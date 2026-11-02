@@ -130,7 +130,7 @@ export async function saveWrittenApplication(input: WrittenApplication): Promise
 
   const applicationId = await createApplicationFromDocuments({
     reading: { posting: input.posting, extracted, extractedWith: WRITTEN_IN_CLAUDE, matchedWith: WRITTEN_IN_CLAUDE },
-    documents: { resume, resumeWith: WRITTEN_IN_CLAUDE, letter, letterWith: WRITTEN_IN_CLAUDE },
+    documents: { resume, resumeWith: WRITTEN_IN_CLAUDE, letter, letterWith: WRITTEN_IN_CLAUDE, latexStatus: "none" },
     match,
     details: {
       title: details.title?.trim() || [details.role, details.company].filter((part) => part.trim()).join(" · "),

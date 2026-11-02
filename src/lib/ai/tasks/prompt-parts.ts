@@ -99,7 +99,12 @@ export function jobForPrompt(extracted: Extracted, match: Match | null): string 
       role: extracted.role,
       location: extracted.location,
       requirements: match
-        ? match.items.map((item) => ({ requirement: item.requirement, inProfile: item.result, note: item.note }))
+        ? match.items.map((item) => ({
+            requirement: item.requirement,
+            inProfile: item.result,
+            note: item.note,
+            ...(item.comment ? { candidateComment: item.comment } : {}),
+          }))
         : extracted.requirements.map((requirement) => requirement.text),
     },
     null,
@@ -107,10 +112,21 @@ export function jobForPrompt(extracted: Extracted, match: Match | null): string 
   );
 }
 
+export const FACTS_HEADING = "What the candidate tells you for this application";
+
 /** What the candidate tells the AI for this application (APP-15), for the user message; null without any. */
 export function applicationFacts(facts: string[]): string | null {
-  return facts.length > 0 ? `What the candidate tells you for this application:\n${facts.map((fact) => `- ${fact}`).join("\n")}` : null;
+  return facts.length > 0 ? `${FACTS_HEADING}:\n${facts.map((fact) => `- ${fact}`).join("\n")}` : null;
 }
+
+/** Precedence clause and base instructions for candidate-provided comments. */
+export const COMMENT_RULES_BASE = `Items with "candidateComment" and the "${FACTS_HEADING}" section are first-hand statements from the candidate and count as verified. They take precedence over "not in profile" when deciding what you may claim. Use them in your output, but do not invent details beyond what the candidate wrote.`;
+
+export const RESUME_COMMENT_RULES = `${COMMENT_RULES_BASE} In the resume, weave in candidate comments only where they describe concrete work, skills, or projects. Do not invent experience for gaps.`;
+
+export const COVER_LETTER_COMMENT_RULES = `${COMMENT_RULES_BASE} In the cover letter, if a requirement is marked as a gap or partial match but has a candidateComment, address it honestly using that comment.`;
+
+export const EMAIL_COMMENT_RULES = `${COMMENT_RULES_BASE} In the email, weave in candidate comments that are directly relevant to reaching out.`;
 
 /** How to use the candidate's own facts (PRO-14, APP-15), for the writing tasks; null when there are none. */
 export function candidateFacts(profile: ProfileData, facts: string[]): string | null {

@@ -246,10 +246,10 @@ describe("how you match (E7-4)", () => {
     expect(screen.getByText("2 of 4 covered by your profile")).toBeInTheDocument();
     const rows = within(screen.getByRole("list", { name: "Requirements" })).getAllByRole("listitem");
     expect(rows.map((row) => row.textContent)).toEqual([
-      "✓Covered: 5+ years of product design3 roles in your profile, since Sep 2015",
-      "–Not covered: Accessibility know-howNot in your profile yet+ Add to profile",
-      "~Partly covered: Strong prototyping in FigmaIn your skills, but not linked to a role yet",
-      "–Not covered: Experience with paymentsNothing in your profile, so I'll address it honestly in the letter",
+      "✓Covered: 5+ years of product design3 roles in your profile, since Sep 2015+ Comment",
+      "–Not covered: Accessibility know-howNot in your profile yet+ Add to profile+ Comment",
+      "~Partly covered: Strong prototyping in FigmaIn your skills, but not linked to a role yet+ Comment",
+      "–Not covered: Experience with paymentsNothing in your profile, so I'll address it honestly in the letter+ Comment",
     ]);
     expect(screen.getByText(/^Gaps aren't dealbreakers\./)).toBeInTheDocument();
   });
@@ -287,12 +287,15 @@ describe("tailoring (E7-5)", () => {
     expect(screen.getByText("Traditional and polished.")).toBeInTheDocument();
     await userEvent.click(within(tones).getByRole("radio", { name: "Direct" }));
     expect(screen.getByText("Short sentences, straight to the point.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Anything I should know?")).toHaveAttribute("placeholder", "e.g. I'm relocating to Amsterdam in January. Or: lean on my research work.");
+    expect(screen.getByLabelText("Combined comments & instructions for AI")).toHaveAttribute(
+      "placeholder",
+      "e.g. Emphasize my systems architecture and leadership experience; keep the cover letter concise and technical; lean on my open-source work...",
+    );
   });
 
   it("goes back to the posting with everything kept", async () => {
     await review();
-    await userEvent.type(screen.getByLabelText("Anything I should know?"), "Lean on research.");
+    await userEvent.type(screen.getByLabelText("Combined comments & instructions for AI"), "Lean on research.");
     await userEvent.click(screen.getByRole("button", { name: "← Back to the posting" }));
     expect(screen.getByLabelText("Job posting")).toHaveValue("Ledgerly is hiring.");
   });
@@ -312,7 +315,7 @@ describe("creating the application (E7-6)", () => {
     await userEvent.type(screen.getByLabelText("Job posting"), "Ledgerly is hiring.");
     await userEvent.click(screen.getByRole("button", { name: "Read the posting →" }));
     emit({ status: "DONE", result: read });
-    await userEvent.type(screen.getByLabelText("Anything I should know?"), "Lean on research.");
+    await userEvent.type(screen.getByLabelText("Combined comments & instructions for AI"), "Lean on research.");
     await userEvent.click(screen.getByRole("button", { name: "Create application →" }));
   }
 
@@ -376,7 +379,7 @@ describe("creating the application (E7-6)", () => {
     emit({ id: "job-2", type: "write-documents", status: "FAILED", step: "Tailoring your resume", error: "The model took too long to answer. Try again, or pick a faster model." });
     expect(screen.getByRole("alert")).toHaveTextContent("The model took too long to answer.");
     await userEvent.click(screen.getByRole("button", { name: "← Back to the details" }));
-    expect(screen.getByLabelText("Anything I should know?")).toHaveValue("Lean on research.");
+    expect(screen.getByLabelText("Combined comments & instructions for AI")).toHaveValue("Lean on research.");
   });
 });
 
@@ -467,6 +470,196 @@ describe("keeping the draft (E7-7)", () => {
     screen.getByRole("link", { name: "Profile" }).dispatchEvent(leave);
     expect(cancel).toHaveBeenCalledWith({ id: "job-1" });
     confirm.mockRestore();
+  });
+
+  it("attaches comments to requirements and passes them to startWritingDocuments", async () => {
+    const user = userEvent.setup();
+    vi.mocked(startWritingDocuments).mockResolvedValue({ ok: true, data: "job-2" });
+    render(<NewApplication {...props} />);
+    await user.type(screen.getByLabelText("Job posting"), "Ledgerly is hiring.");
+    await user.click(screen.getByRole("button", { name: "Read the posting →" }));
+
+    const readResult = {
+      extracted: {
+        title: "Designer",
+        company: "Ledgerly",
+        role: "Designer",
+        location: null,
+        mode: null,
+        salary: null,
+        deadline: null,
+        requirements: [{ text: "Figma expertise", kind: "skill" as const, skill: "Figma", years: null, language: null }],
+        asksForReferences: false,
+        language: "English",
+      },
+      extractedWith: "extract-posting@1",
+      match: {
+        items: [{ requirement: "Figma expertise", result: "gap" as const, skill: "Figma", experienceIds: [], note: "Nothing in profile" }],
+      },
+      matchedWith: "match-requirements@1",
+    };
+    emit({ status: "DONE", result: readResult });
+
+    // Add comment to requirement
+    await user.click(screen.getByRole("button", { name: "+ Comment" }));
+    const textarea = screen.getByLabelText("Comment for this requirement");
+    await user.type(textarea, "I built design tokens plugin in Figma");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText("I built design tokens plugin in Figma")).toBeInTheDocument();
+
+    // Create application
+    await user.click(screen.getByRole("button", { name: "Create application →" }));
+    expect(startWritingDocuments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        match: {
+          items: [
+            expect.objectContaining({
+              requirement: "Figma expertise",
+              comment: "I built design tokens plugin in Figma",
+            }),
+          ],
+        },
+      }),
+    );
+  });
+
+  it("preserves comments when re-reading a posting", async () => {
+    const user = userEvent.setup();
+    render(<NewApplication {...props} />);
+    await user.type(screen.getByLabelText("Job posting"), "Ledgerly is hiring.");
+    await user.click(screen.getByRole("button", { name: "Read the posting →" }));
+
+    const read1 = {
+      extracted: {
+        title: "Designer",
+        company: "Ledgerly",
+        role: "Designer",
+        location: null,
+        mode: null,
+        salary: null,
+        deadline: null,
+        requirements: [{ text: "Figma expertise", kind: "skill" as const, skill: "Figma", years: null, language: null }],
+        asksForReferences: false,
+        language: "English",
+      },
+      extractedWith: "extract-posting@1",
+      match: {
+        items: [{ requirement: "Figma expertise", result: "gap" as const, skill: "Figma", experienceIds: [], note: "Nothing in profile" }],
+      },
+      matchedWith: "match-requirements@1",
+    };
+    emit({ status: "DONE", result: read1 });
+
+    // Add comment
+    await user.click(screen.getByRole("button", { name: "+ Comment" }));
+    await user.type(screen.getByLabelText("Comment for this requirement"), "Preserved comment");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    // Go back and re-read
+    await user.click(screen.getByRole("button", { name: "← Back to the posting" }));
+    await user.type(screen.getByLabelText("Job posting"), " Updated posting.");
+    vi.mocked(startReadingPosting).mockResolvedValueOnce({ ok: true, data: "job-2" });
+    await user.click(screen.getByRole("button", { name: "Read the posting →" }));
+
+    // Re-reading done with new job result having the same requirement
+    const read2 = {
+      ...read1,
+      match: {
+        items: [{ requirement: "Figma expertise", result: "gap" as const, skill: "Figma", experienceIds: [], note: "Nothing in profile" }],
+      },
+    };
+    emit({ id: "job-2", status: "DONE", result: read2 });
+
+    expect(screen.getByText("Preserved comment")).toBeInTheDocument();
+  });
+
+  it("shows AgentProgressConsole during creation with diff and View application button", async () => {
+    vi.mocked(createApplication).mockResolvedValue({ ok: true, data: "app-1" });
+    vi.mocked(startWritingDocuments).mockResolvedValue({ ok: true, data: "job-write-1" });
+    const user = userEvent.setup();
+    render(
+      <NewApplication
+        {...props}
+        resumeFormat="latex"
+        baseResumeLatex={"\\documentclass{article}\n\\begin{document}\nBase resume\n\\end{document}"}
+      />,
+    );
+
+    // Read step
+    await user.type(screen.getByLabelText("Job posting"), "Ledgerly is hiring.");
+    await user.click(screen.getByRole("button", { name: "Read the posting →" }));
+
+    const read = {
+      extracted: {
+        title: "Designer · Ledgerly",
+        company: "Ledgerly",
+        role: "Designer",
+        location: null,
+        mode: null,
+        salary: null,
+        deadline: null,
+        requirements: [{ text: "Figma", kind: "skill" as const, skill: "Figma", years: null, language: null }],
+        asksForReferences: false,
+        language: "English",
+      },
+      extractedWith: "extract-posting@1",
+      match: {
+        items: [{ requirement: "Figma", result: "covered" as const, skill: "Figma", experienceIds: [], note: "Matches" }],
+      },
+      matchedWith: "match-requirements@1",
+    };
+    emit({ status: "DONE", result: read });
+
+    // Add requirement comment
+    await user.click(screen.getByRole("button", { name: "+ Comment" }));
+    await user.type(screen.getByLabelText("Comment for this requirement"), "Designed mobile UI");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    // Add tailoring note
+    await user.type(screen.getByLabelText("Combined comments & instructions for AI"), "Highlight design systems.");
+
+    await user.click(screen.getByRole("button", { name: "Create application →" }));
+
+    // Console should show comments read
+    expect(screen.getByText("Application Tailoring Console")).toBeInTheDocument();
+    expect(screen.getByText(/Candidate instructions read/)).toBeInTheDocument();
+    expect(screen.getByText("Designed mobile UI")).toBeInTheDocument();
+    expect(screen.getByText("Highlight design systems.")).toBeInTheDocument();
+
+    // Emitting running step
+    emit({
+      id: "job-write-1",
+      type: "write-documents",
+      status: "RUNNING",
+      step: "Tailoring your LaTeX resume",
+    });
+    expect(screen.getByText("[Agent] Tailoring your LaTeX resume")).toBeInTheDocument();
+
+    // Emitting job completion with tailored LaTeX code
+    emit({
+      id: "job-write-1",
+      type: "write-documents",
+      status: "DONE",
+      step: "Writing your cover letter",
+      result: {
+        resume: [],
+        resumeWith: "v1",
+        letter: [],
+        letterWith: "v1",
+        latex: "\\documentclass{article}\n\\begin{document}\nTailored resume with Figma\n\\end{document}",
+        latexStatus: "tailored",
+        baseLatex: "\\documentclass{article}\n\\begin{document}\nBase resume\n\\end{document}",
+      },
+    });
+
+    // Should display diff and 'View application →' button
+    expect(screen.getByText("Tailored LaTeX changes")).toBeInTheDocument();
+    expect(screen.getByText("Tailored resume with Figma")).toBeInTheDocument();
+
+    const viewButton = screen.getByRole("button", { name: "View application →" });
+    await user.click(viewButton);
+    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith("/applications/app-1"));
   });
 });
 

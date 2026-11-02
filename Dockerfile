@@ -9,6 +9,39 @@ RUN corepack enable
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Where Playwright keeps Chromium: in the image, not in a user's home or a volume.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Where Tectonic caches TeX packages on the data volume.
+ENV TECTONIC_CACHE_DIR=/data/tectonic
+
+# Tectonic LaTeX engine (pinned version and checksums for x86_64 and aarch64 musl).
+ARG TECTONIC_VERSION=0.15.0
+RUN node -e ' \
+  const https = require("https"); \
+  const crypto = require("crypto"); \
+  const fs = require("fs"); \
+  const { execSync } = require("child_process"); \
+  const arch = process.arch === "arm64" ? "aarch64" : "x86_64"; \
+  const sha = process.arch === "arm64" \
+    ? "1f59f9fb8eb65e8ba18658fc9016767e7d3e12488ded8b8fffa34254e51ce42c" \
+    : "dfb82876f2986862996e564fa507a9e576e0c1e3bee63c2c1bd677c2543e6407"; \
+  const url = `https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40${process.env.TECTONIC_VERSION || "0.15.0"}/tectonic-${process.env.TECTONIC_VERSION || "0.15.0"}-${arch}-unknown-linux-musl.tar.gz`; \
+  function download(targetUrl) { \
+    https.get(targetUrl, (res) => { \
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) return download(res.headers.location); \
+      if (res.statusCode !== 200) throw new Error(`Download failed: ${res.statusCode}`); \
+      const hash = crypto.createHash("sha256"); \
+      const file = fs.createWriteStream("/tmp/tectonic.tar.gz"); \
+      res.on("data", (chunk) => { hash.update(chunk); file.write(chunk); }); \
+      res.on("end", () => { \
+        file.end(() => { \
+          const digest = hash.digest("hex"); \
+          if (digest !== sha) throw new Error(`Checksum mismatch: expected ${sha}, got ${digest}`); \
+          execSync("tar -xzf /tmp/tectonic.tar.gz -C /usr/local/bin tectonic && chmod 755 /usr/local/bin/tectonic"); \
+          fs.unlinkSync("/tmp/tectonic.tar.gz"); \
+        }); \
+      }); \
+    }); \
+  } \
+  download(url);'
 
 # Development image: dependencies are baked in, source is bind-mounted by compose.yml.
 FROM base AS dev

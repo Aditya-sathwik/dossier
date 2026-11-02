@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { PageHeader } from "@/components/page-header";
 import { toast, toastResult } from "@/components/toast";
@@ -15,7 +15,8 @@ import type { Tone } from "@/generated/prisma/enums";
 import { useJob } from "@/hooks/use-job";
 import { withSkillAdded, type Extracted } from "@/lib/application-data";
 import { cancel, retry } from "@/lib/jobs/actions";
-import { READ_POSTING_STEPS, WRITE_DOCUMENTS_STEPS } from "@/lib/jobs/application-steps";
+import { READ_POSTING_STEPS, WRITE_DOCUMENTS_STEPS, writeDocumentsSteps } from "@/lib/jobs/application-steps";
+import { AgentProgressConsole, type AgentComment, type AgentProgressStep } from "@/components/agent-progress-console";
 import type { ReadPostingResult } from "@/lib/jobs/read-posting";
 import type { WriteDocumentsResult } from "@/lib/jobs/write-documents";
 
@@ -144,10 +145,23 @@ export type NewApplicationProps = {
   fresh?: boolean;
   /** "Start application" on Find jobs: start over from this posting. */
   fromPosting?: FromPosting | null;
+  /** Format of resume (standard | latex). */
+  resumeFormat?: "standard" | "latex";
+  /** Base LaTeX resume template if configured. */
+  baseResumeLatex?: string;
 };
 
 /** The new application flow (E7): paste → read → review → create. */
-export function NewApplication({ aiReady, writeInClaude = false, samplePosting, defaultTone, fresh = false, fromPosting = null }: NewApplicationProps) {
+export function NewApplication({
+  aiReady,
+  writeInClaude = false,
+  samplePosting,
+  defaultTone,
+  fresh = false,
+  fromPosting = null,
+  resumeFormat = "standard",
+  baseResumeLatex = "",
+}: NewApplicationProps) {
   const [initial] = useState<Draft>(() => ({
     step: "paste",
     posting: "",
@@ -211,11 +225,28 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
   const readJob = useJob<ReadPostingResult>(draft.readJobId, readRevision, (job) => {
     if (job.status !== "DONE" || !job.result) return;
     const read = job.result;
-    setDraft((current) =>
-      current.step === "reading" && current.readJobId === job.id
-        ? { ...current, step: "review", read, details: detailsFrom(read.extracted) }
-        : current,
-    );
+    setDraft((current) => {
+      if (current.step !== "reading" || current.readJobId !== job.id) return current;
+      // Preserve existing comments on matching requirements if re-reading
+      const existingComments = new Map(
+        current.read?.match.items
+          .filter((item) => item.comment)
+          .map((item) => [item.requirement, item.comment as string]) ?? [],
+      );
+      const items = existingComments.size > 0
+        ? read.match.items.map((item) =>
+            existingComments.has(item.requirement)
+              ? { ...item, comment: existingComments.get(item.requirement) }
+              : item,
+          )
+        : read.match.items;
+      return {
+        ...current,
+        step: "review",
+        read: { ...read, match: { ...read.match, items } },
+        details: detailsFrom(read.extracted),
+      };
+    });
   });
 
   const read = async () => {
@@ -231,7 +262,7 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
     setStarting(true);
     const result = toastResult(await startReadingPosting({ posting: draft.posting }));
     setStarting(false);
-    if (result.ok) update({ step: "reading", readJobId: result.data, readFor: draft.posting.trim(), read: null });
+    if (result.ok) update({ step: "reading", readJobId: result.data, readFor: draft.posting.trim(), read: draft.read });
   };
 
   // #221: Claude chat writes it on the user's own Claude plan, through the
@@ -272,9 +303,21 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
     setDraft((current) => {
       if (!current.read) return current;
       const items = current.read.match.items.map((item, position) => (position === index ? withSkillAdded(item, name) : item));
-      return { ...current, read: { ...current.read, match: { items } } };
+      return { ...current, read: { ...current.read, match: { ...current.read.match, items } } };
     });
     toast(`Added “${name}” to your skills. Attach it to a role under Experience to make it count.`);
+  };
+
+  const updateComment = (index: number, requirement: string, comment?: string) => {
+    setDraft((current) => {
+      if (!current.read) return current;
+      const items = current.read.match.items.map((item, i) =>
+        i === index && item.requirement === requirement
+          ? { ...item, comment: comment?.trim() || undefined }
+          : item,
+      );
+      return { ...current, read: { ...current.read, match: { ...current.read.match, items } } };
+    });
   };
 
   // E7-6: write the documents, then create the application from them.
@@ -303,9 +346,59 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
     router.push(`/applications/${result.data}`);
   };
 
+  const isLatex = resumeFormat === "latex" && !!baseResumeLatex;
+  const hasComments = Boolean(draft.read?.match.items.some((i) => i.comment) || draft.note.trim());
+  const creatingSteps = useMemo(
+    () => writeDocumentsSteps({ hasComments, latex: isLatex }),
+    [hasComments, isLatex],
+  );
+
   const writeJob = useJob<WriteDocumentsResult>(draft.writeJobId, writeRevision, (job) => {
-    if (job.status === "DONE" && job.id === draft.writeJobId) void save(job.id);
+    // If not LaTeX or no diff to inspect, save immediately as before
+    if (job.status === "DONE" && job.id === draft.writeJobId) {
+      if (!isLatex) {
+        void save(job.id);
+      }
+    }
   });
+
+  const commentsForConsole: AgentComment[] = useMemo(() => {
+    const list: AgentComment[] = [];
+    if (draft.read?.match.items) {
+      for (const item of draft.read.match.items) {
+        if (item.comment?.trim()) {
+          list.push({
+            id: item.requirement,
+            label: item.requirement,
+            text: item.comment.trim(),
+          });
+        }
+      }
+    }
+    if (draft.note.trim()) {
+      list.push({
+        id: "general-note",
+        label: "General tailoring note",
+        text: draft.note.trim(),
+      });
+    }
+    return list;
+  }, [draft.read?.match.items, draft.note]);
+
+  const consoleSteps: AgentProgressStep[] = useMemo(() => {
+    const activeIndex = writeJob?.status === "DONE" ? creatingSteps.length : jobStep(creatingSteps, writeJob);
+    return creatingSteps.map((name, index) => {
+      let status: AgentProgressStep["status"] = "pending";
+      if (writeJob?.status === "FAILED" && index === activeIndex) {
+        status = "error";
+      } else if (index < activeIndex || writeJob?.status === "DONE") {
+        status = "done";
+      } else if (index === activeIndex && writeJob?.status === "RUNNING") {
+        status = "running";
+      }
+      return { name, status };
+    });
+  }, [creatingSteps, writeJob]);
 
   const create = async () => {
     if (!draft.read || !draft.readJobId || starting) return;
@@ -442,7 +535,12 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
           {draft.step === "review" && draft.read && (
             <>
               <DetailsCard details={draft.details} onChange={(details) => update({ details })} />
-              <MatchCard match={draft.read.match} requirements={draft.read.extracted.requirements} onAddSkill={(index, skill) => void addToProfile(index, skill)} />
+              <MatchCard
+                match={draft.read.match}
+                requirements={draft.read.extracted.requirements}
+                onAddSkill={(index, skill) => void addToProfile(index, skill)}
+                onCommentChange={updateComment}
+              />
               <TailoringCard tone={draft.tone} note={draft.note} onTone={(tone) => update({ tone })} onNote={(note) => update({ note })} />
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button variant="text" onClick={() => update({ step: "paste" })}>
@@ -456,16 +554,33 @@ export function NewApplication({ aiReady, writeInClaude = false, samplePosting, 
           )}
 
           {draft.step === "creating" && (
-            <JobProgress
-              title="Putting your application together…"
-              steps={WRITE_DOCUMENTS_STEPS}
-              // "Saving the application" is the last step, once the documents are written.
-              current={writeJob?.status === "DONE" ? 2 : jobStep(WRITE_DOCUMENTS_STEPS, writeJob)}
-              error={writeJob?.status === "FAILED" ? writeJob.error : saveError}
-              onRetry={() => void retryCreating()}
-              onBack={() => update({ step: "review" })}
-              backLabel="← Back to the details"
-            />
+            <div className="flex flex-col gap-6">
+              <JobProgress
+                title="Putting your application together…"
+                steps={creatingSteps}
+                // "Saving the application" is the last step, once the documents are written.
+                current={writeJob?.status === "DONE" ? creatingSteps.length - 1 : jobStep(creatingSteps, writeJob)}
+                error={writeJob?.status === "FAILED" ? writeJob.error : saveError}
+                onRetry={() => void retryCreating()}
+                onBack={() => update({ step: "review" })}
+                backLabel="← Back to the details"
+              />
+              <AgentProgressConsole
+                title="Application Tailoring Console"
+                agentName="Tailor Agent"
+                steps={consoleSteps}
+                comments={commentsForConsole}
+                originalCode={writeJob?.result?.baseLatex ?? (isLatex ? baseResumeLatex : null)}
+                updatedCode={writeJob?.result?.latex ?? null}
+                latexStatus={writeJob?.result?.latexStatus ?? "none"}
+                latexError={writeJob?.result?.latexError ?? null}
+                isDone={writeJob?.status === "DONE"}
+                onCompleteAction={() => {
+                  if (draft.writeJobId) void save(draft.writeJobId);
+                }}
+                completeActionLabel="View application →"
+              />
+            </div>
           )}
         </div>
       </div>

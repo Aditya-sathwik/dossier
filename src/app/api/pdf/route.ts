@@ -2,10 +2,12 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { DocumentKind } from "@/generated/prisma/enums";
 import { resolveFileName } from "@/lib/file-name";
+import { baseLatexOrGenerated, latexSourceOf } from "@/lib/latex/base";
+import { renderLatexPdf, LatexRenderError } from "@/lib/latex/render";
 import { holdPdf, pdfDownload } from "@/lib/pdf/downloads";
 import { renderPdf } from "@/lib/pdf/render";
 import { prisma } from "@/lib/prisma";
-import { loadProfileName } from "@/lib/profile-data";
+import { loadProfile, loadProfileName } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 import { route } from "@/lib/route";
 
@@ -47,27 +49,74 @@ async function renderRequested(request: NextRequest): Promise<{ pdf: Uint8Array;
   const date = new Date();
 
   if (doc === "base") {
+    const fileName = resolveFileName(settings.fileNamePattern, { name, doc: DocumentKind.RESUME, date });
+    if (settings.resumeFormat === "latex") {
+      const profile = await loadProfile();
+      try {
+        const pdf = await renderLatexPdf(baseLatexOrGenerated(settings, profile));
+        return { pdf, fileName };
+      } catch (err) {
+        const message = err instanceof LatexRenderError ? err.message : "Failed to compile base LaTeX resume.";
+        return NextResponse.json({ error: message }, { status: 422 });
+      }
+    }
     return {
       pdf: await renderPdf("/print/base"),
-      fileName: resolveFileName(settings.fileNamePattern, { name, doc: DocumentKind.RESUME, date }),
+      fileName,
+    };
+  }
+
+  const id = params.get("application") ?? "";
+
+  if (doc === "custom") {
+    const application = APPLICATION_ID.test(id)
+      ? await prisma.application.findUnique({
+          where: { id },
+          select: { customResumeName: true, customResumeData: true },
+        })
+      : null;
+    if (!application || !application.customResumeData) return notFound("This application has no custom resume uploaded.");
+    const base64 = application.customResumeData.replace(/^data:[^;]+;base64,/, "");
+    return {
+      pdf: Buffer.from(base64, "base64"),
+      fileName: application.customResumeName || "Resume.pdf",
     };
   }
 
   if (doc !== "resume" && doc !== "letter") return notFound("There's no such document to download.");
-  const id = params.get("application") ?? "";
   const application = APPLICATION_ID.test(id)
     ? await prisma.application.findUnique({
         where: { id },
-        select: { company: true, role: true, documents: { where: { kind: TAILORED[doc] }, select: { id: true } } },
+        select: {
+          company: true,
+          role: true,
+          resumeFormat: true,
+          latexCode: true,
+          documents: { where: { kind: TAILORED[doc] }, select: { id: true } },
+        },
       })
     : null;
   if (!application) return notFound("That application no longer exists.");
+
+  const fileName = resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: TAILORED[doc], date });
+
+  if (doc === "resume" && application.resumeFormat === "latex") {
+    const profile = await loadProfile();
+    try {
+      const pdf = await renderLatexPdf(latexSourceOf(application, settings, profile));
+      return { pdf, fileName };
+    } catch (err) {
+      const message = err instanceof LatexRenderError ? err.message : "Failed to compile tailored LaTeX resume.";
+      return NextResponse.json({ error: message }, { status: 422 });
+    }
+  }
+
   if (application.documents.length === 0) {
     return notFound(doc === "resume" ? "This application has no tailored resume." : "This application has no cover letter.");
   }
 
   return {
     pdf: await renderPdf(`/print/${doc}/${id}`),
-    fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: TAILORED[doc], date }),
+    fileName,
   };
 }

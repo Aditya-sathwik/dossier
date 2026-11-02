@@ -9,15 +9,22 @@ export function MatchCard({
   match,
   requirements,
   onAddSkill,
+  onCommentChange,
 }: {
   match: Match;
   /** The extracted requirements, in the same order as the match's items. */
   requirements: Requirement[];
   onAddSkill: (index: number, skill: string) => void;
+  onCommentChange?: (index: number, requirement: string, comment?: string) => void;
 }) {
   return (
     <Card padding="none" className="flex flex-col px-7 pt-6 pb-3">
-      <MatchRows match={match} requirements={requirements} onAddSkill={onAddSkill} />
+      <MatchRows
+        match={match}
+        requirements={requirements}
+        onAddSkill={onAddSkill}
+        onCommentChange={onCommentChange}
+      />
       <p className="border-t border-line py-3 text-meta text-muted">
         Gaps aren&apos;t dealbreakers. I&apos;ll never invent experience. The important ones get addressed honestly in your cover letter.
       </p>

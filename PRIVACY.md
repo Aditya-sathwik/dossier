@@ -49,6 +49,7 @@ Exports you download and database dumps you take are copies outside Dossier's re
 | The site a posting is on | When you press **Fetch** on a new application, and for a Find jobs posting that came with only its start | A request for the posting's page, from your server, never to an address on your own network |
 | GitHub | Once on each day Dossier is used, while **Check for updates daily** is on in Settings → About (it is by default), and when you press **Check for updates** | A request for the latest release, from your server. Nothing about you or your install, though GitHub sees your server's address, as with any request |
 | `telemetry.dossier.aien.me` | Once on each day Dossier is used, only after you agree (Dossier asks once, after you sign in) or set `DOSSIER_TELEMETRY=on` | A random install ID and the version number. See [Usage ping](#usage-ping) |
+| Tectonic package repository (`relay.fullyjustified.net`) | When a LaTeX resume compiles and needs a standard LaTeX package not yet in the local cache | Downloads official TeX Live package bundles. No user data, profile, or resume content is ever sent |
 
 Nothing else is sent. Your browser loads nothing from other sites (the Content-Security-Policy forbids it), and Next.js telemetry is off in the image.
 

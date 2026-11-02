@@ -36,6 +36,16 @@ export const POSTED_WITHIN = [
 export type PostedWithin = (typeof POSTED_WITHIN)[number]["value"];
 const POSTED_VALUES = POSTED_WITHIN.map((option) => option.value) as [PostedWithin, ...PostedWithin[]];
 
+/** Minimum experience / seniority requirements for jobs. */
+export const EXPERIENCE_LEVELS = [
+  { value: "any", label: "Any experience" },
+  { value: "entry", label: "Entry / <3 yrs" },
+  { value: "mid", label: "Mid / 3–5 yrs" },
+  { value: "senior", label: "Senior / 5+ yrs" },
+] as const;
+export type ExperienceLevel = (typeof EXPERIENCE_LEVELS)[number]["value"];
+export const EXPERIENCE_VALUES = EXPERIENCE_LEVELS.map((option) => option.value) as [ExperienceLevel, ...ExperienceLevel[]];
+
 /** One search, as every source gets it. */
 export const searchQuerySchema = z.object({
   keywords: z.string().trim().max(200),
@@ -50,6 +60,7 @@ export const searchQuerySchema = z.object({
   radiusKm: z.literal(RADII_KM),
   remoteOnly: z.boolean(),
   postedWithin: z.enum(POSTED_VALUES),
+  experienceLevel: z.enum(EXPERIENCE_VALUES).default("any").catch("any"),
 });
 export type SearchQuery = z.output<typeof searchQuerySchema>;
 
@@ -60,6 +71,7 @@ export const EMPTY_QUERY: SearchQuery = {
   radiusKm: DEFAULT_RADIUS_KM,
   remoteOnly: false,
   postedWithin: "any",
+  experienceLevel: "any",
 };
 
 /** A posting as a source found it, in one shape for every source. */
@@ -135,7 +147,16 @@ export type PastSearchDay = {
 export function describeSearch(query: SearchQuery, countryName: string, source?: JobSource | null): string {
   const where = query.place ? (source && !SOURCE_INFO[source].radius ? query.place : `${query.place}, ${query.radiusKm} km`) : countryName;
   const posted = POSTED_WITHIN.find((option) => option.value === query.postedWithin);
-  return [query.keywords, where, query.remoteOnly ? "Remote only" : "", posted && posted.value !== "any" ? posted.label : ""].filter(Boolean).join(" · ");
+  const experience = EXPERIENCE_LEVELS.find((option) => option.value === query.experienceLevel);
+  return [
+    query.keywords,
+    where,
+    experience && experience.value !== "any" ? experience.label : "",
+    query.remoteOnly ? "Remote only" : "",
+    posted && posted.value !== "any" ? posted.label : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** Identifies a posting across searches. */
@@ -183,6 +204,7 @@ export function queryFromParams(params: Record<string, string | string[] | undef
   if (!keywords) return null;
   const radius = Number(one(params.radius));
   const posted = POSTED_VALUES.find((value) => value === one(params.posted));
+  const experience = EXPERIENCE_VALUES.find((value) => value === one(params.experience));
   const country = one(params.country).trim().toLowerCase();
   return {
     keywords: keywords.slice(0, 200),
@@ -191,6 +213,7 @@ export function queryFromParams(params: Record<string, string | string[] | undef
     radiusKm: RADII_KM.find((km) => km === radius) ?? DEFAULT_RADIUS_KM,
     remoteOnly: one(params.remote) === "1",
     postedWithin: posted ?? "any",
+    experienceLevel: experience ?? "any",
   };
 }
 
@@ -215,6 +238,7 @@ export function searchHref(query: SearchQuery): string {
   if (query.radiusKm !== DEFAULT_RADIUS_KM) params.set("radius", String(query.radiusKm));
   if (query.remoteOnly) params.set("remote", "1");
   if (query.postedWithin !== "any") params.set("posted", query.postedWithin);
+  if (query.experienceLevel && query.experienceLevel !== "any") params.set("experience", query.experienceLevel);
   return `/jobs?${params.toString()}`;
 }
 

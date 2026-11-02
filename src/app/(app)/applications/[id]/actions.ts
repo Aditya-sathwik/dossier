@@ -18,15 +18,90 @@ import { saveVersion } from "@/lib/document-versions";
 import { refineJob, refineJobKey } from "@/lib/jobs/refine";
 import { regenerateUnitJob, unitJobKey } from "@/lib/jobs/regenerate-unit";
 import { findUnfinishedJobs, startJob } from "@/lib/jobs/runner";
+import { tailorLatexJob, tailorLatexJobKey } from "@/lib/jobs/tailor-latex";
 import { emailJobKey, writeEmailJob } from "@/lib/jobs/write-email";
+import { baseLatexOrGenerated } from "@/lib/latex/base";
 import { prisma } from "@/lib/prisma";
 import { findOrCreateSkill } from "@/lib/profile-entries";
+import { loadProfile } from "@/lib/profile-data";
+import { RESUME_FORMATS } from "@/lib/settings";
+import { loadSettings } from "@/lib/settings-data";
 import { cleanUnitText, isPublicationUnit, unitName } from "@/lib/unit-text";
 
 const GONE = "That application no longer exists.";
 const PART_GONE = "That part of the document no longer exists. Reload the page to see what's there now.";
 
 const refresh = (id: string) => revalidatePath(`/applications/${id}`);
+
+/** Saves the tailored LaTeX resume code for this application. */
+export const saveApplicationLatex = action(
+  z.object({ id: z.string().min(1), latex: z.string().max(200_000) }),
+  async ({ id, latex }) => {
+    const { count } = await prisma.application.updateMany({
+      where: { id },
+      data: { latexCode: latex },
+    });
+    if (count === 0) throw new ActionError(GONE);
+    refresh(id);
+    return null;
+  },
+);
+
+/** Switches the application's resume format: standard or latex. */
+export const setApplicationResumeFormat = action(
+  z.object({ id: z.string().min(1), format: z.enum(RESUME_FORMATS) }),
+  async ({ id, format }) => {
+    const { count } = await prisma.application.updateMany({
+      where: { id },
+      data: { resumeFormat: format },
+    });
+    if (count === 0) throw new ActionError(GONE);
+    refresh(id);
+    return { format };
+  },
+);
+
+/** Starts the background job to tailor the application's LaTeX resume with AI. */
+export const startTailoringLatex = action(
+  z.object({ id: z.string().min(1) }),
+  async ({ id }, { toast }) => {
+    if (!isAiConfigured()) throw new ActionError("AI is not configured. Set up an AI provider in Settings.");
+    const app = await prisma.application.findUnique({
+      where: { id },
+      select: { id: true, postingText: true, role: true },
+    });
+    if (!app) throw new ActionError(GONE);
+    if (!app.postingText && !app.role) {
+      throw new ActionError("Add a job posting or role description before tailoring the resume.");
+    }
+    const key = tailorLatexJobKey(id);
+    const running = (await findUnfinishedJobs(key))[0];
+    if (running) {
+      toast("Already tailoring LaTeX resume for this application.");
+      return { jobId: running.id, alreadyRunning: true };
+    }
+    const jobId = await startJob(tailorLatexJob, { applicationId: id }, { key, applicationId: id });
+    toast("Tailoring LaTeX resume with AI…");
+    return { jobId, alreadyRunning: false };
+  },
+);
+
+/** Resets this application's custom LaTeX resume to the base LaTeX template. */
+export const resetApplicationLatex = action(
+  z.object({ id: z.string().min(1) }),
+  async ({ id }, { toast }) => {
+    const [settings, profile] = await Promise.all([loadSettings(), loadProfile()]);
+    const baseCode = baseLatexOrGenerated(settings, profile);
+    const { count } = await prisma.application.updateMany({
+      where: { id },
+      data: { latexCode: null },
+    });
+    if (count === 0) throw new ActionError(GONE);
+    toast("Reset LaTeX resume to base template.");
+    refresh(id);
+    return { latex: baseCode };
+  },
+);
 
 /** The Resume tab's layout switch (APP-4): the theme's own layout, or a single column. */
 export const setFollowThemeLayout = action(
@@ -263,6 +338,17 @@ export const undoMessage = action(z.object({ id: z.string().min(1), messageId: z
   const edits = message && editsSchema.safeParse(message.edits);
   if (!message || !edits?.success || edits.data.length === 0) throw new ActionError("There's nothing to undo in that message.");
   if (message.undone) throw new ActionError("That's already undone.");
+
+  const latexEdit = edits.data.find((e) => e.unitId === "latex");
+  if (latexEdit) {
+    await prisma.application.update({
+      where: { id },
+      data: { latexCode: latexEdit.previousText },
+    });
+    await prisma.chatMessage.update({ where: { id: messageId }, data: { undone: true } });
+    refresh(id);
+    return { edited: [{ document: DocumentKind.RESUME, unitId: "latex" }] };
+  }
 
   await updateDocuments(id, async (documents, tx) => {
     const changed = edits.data.flatMap((edit) => {
@@ -517,3 +603,48 @@ export const undoEmailRewrite = action(z.object({ id: z.string().min(1), jobId: 
   refresh(id);
   return null;
 });
+
+/** Changes which resume to attach when sending the application: "tailored", "base", or "custom". */
+export const setResumeChoice = action(
+  z.object({ id: z.string().min(1), choice: z.enum(["tailored", "base", "custom"]) }),
+  async ({ id, choice }) => {
+    const { count } = await prisma.application.updateMany({ where: { id }, data: { resumeChoice: choice } });
+    if (count === 0) throw new ActionError(GONE);
+    refresh(id);
+    return null;
+  },
+);
+
+/** Uploads an external PDF as a custom resume for this application. */
+export const uploadCustomResume = action(
+  z.object({
+    id: z.string().min(1),
+    name: z.string().trim().min(1).max(200),
+    dataUrl: z.string().startsWith("data:application/pdf;base64,").max(15_000_000),
+  }),
+  async ({ id, name, dataUrl }, { toast }) => {
+    const { count } = await prisma.application.updateMany({
+      where: { id },
+      data: { customResumeName: name, customResumeData: dataUrl, resumeChoice: "custom" },
+    });
+    if (count === 0) throw new ActionError(GONE);
+    refresh(id);
+    toast(`Uploaded “${name}” as your custom resume.`);
+    return null;
+  },
+);
+
+/** Removes the uploaded custom resume from this application, reverting to tailored. */
+export const removeCustomResume = action(
+  z.object({ id: z.string().min(1) }),
+  async ({ id }, { toast }) => {
+    const { count } = await prisma.application.updateMany({
+      where: { id },
+      data: { customResumeName: null, customResumeData: null, resumeChoice: "tailored" },
+    });
+    if (count === 0) throw new ActionError(GONE);
+    refresh(id);
+    toast("Removed custom resume.");
+    return null;
+  },
+);

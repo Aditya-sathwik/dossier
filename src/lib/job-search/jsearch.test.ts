@@ -32,6 +32,17 @@ describe("JSearch search", () => {
     });
   });
 
+  it("sets job_requirements and query enhancement for experience level", async () => {
+    const requests = stubFetch(() => json(jsearchV2Page));
+    await jsearch.search({ ...query, experienceLevel: "senior" }, ninja, null);
+    expect(requests[0].url.searchParams.get("job_requirements")).toBe("more_than_3_years_experience");
+    expect(requests[0].url.searchParams.get("query")).toBe("Senior product designer in Hamburg");
+
+    await jsearch.search({ ...query, experienceLevel: "entry" }, ninja, null);
+    expect(requests[1].url.searchParams.get("job_requirements")).toBe("under_3_years_experience");
+    expect(requests[1].url.searchParams.get("query")).toBe("Junior product designer in Hamburg");
+  });
+
   it("asks RapidAPI's search-v2 with its own headers, and pages by cursor", async () => {
     const requests = stubFetch(() => json(jsearchV2Page));
     const page = await jsearch.search({ ...query, place: "", remoteOnly: true, postedWithin: "any" }, rapid, null);

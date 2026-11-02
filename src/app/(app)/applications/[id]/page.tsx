@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { cache } from "react";
 
+import { DocumentKind } from "@/generated/prisma/enums";
 import { activityTimeline } from "@/lib/activity";
 import { isAiConfigured } from "@/lib/ai/config";
 import { editsSchema, matchSchema, matchScore } from "@/lib/application-data";
@@ -10,10 +11,12 @@ import { resolveFileName } from "@/lib/file-name";
 import { refineJobKey } from "@/lib/jobs/refine";
 import { regenerateUnitJob, unitJobKey } from "@/lib/jobs/regenerate-unit";
 import { findUnfinishedJobs } from "@/lib/jobs/runner";
+import { tailorLatexJobKey } from "@/lib/jobs/tailor-latex";
 import { emailJobKey } from "@/lib/jobs/write-email";
 import { googleConnection } from "@/lib/google/account";
 import { pullInterviewEvents } from "@/lib/google/availability";
 import { loadConversation } from "@/lib/google/inbox-data";
+import { latexSourceOf } from "@/lib/latex/base";
 import { refineSuggestions } from "@/lib/refine-suggestions";
 import { loadThemes } from "@/lib/theme-data";
 import { userTimeZone } from "@/lib/time-zone";
@@ -40,13 +43,14 @@ export async function generateMetadata({ params }: PageProps<"/applications/[id]
 export default async function ApplicationPage({ params, searchParams }: PageProps<"/applications/[id]">) {
   const [{ id }, { tab }] = await Promise.all([params, searchParams]);
   await pullCalendar(id);
-  const [{ application, profile, settings, extracted, resume, letter, email, includeReferences, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, timeZone, google, emails, themes] =
+  const [{ application, profile, settings, extracted, resume, letter, email, includeReferences, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, tailorLatexJobs, timeZone, google, emails, themes] =
     await Promise.all([
       loadDocuments(id),
       isAiConfigured(),
       findUnfinishedJobs(unitJobKey(id)),
       findUnfinishedJobs(refineJobKey(id)),
       findUnfinishedJobs(emailJobKey(id)),
+      findUnfinishedJobs(tailorLatexJobKey(id)),
       userTimeZone(),
       googleConnection(),
       loadConversation(id),
@@ -92,6 +96,8 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
         archived: application.archivedAt !== null,
         awaitingReview: application.awaitingReview,
         nextInterviewAt,
+        resumeFormat: (application.resumeFormat as "standard" | "latex") ?? "standard",
+        latexCode: latexSourceOf(application, settings, profile),
       }}
       timeZone={timeZone}
       posting={{
@@ -111,7 +117,14 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
       baseThemeId={settings.baseThemeId}
       email={email}
       writingEmail={emailJobs.at(-1)?.id ?? null}
-      attachments={{ resume: resume ? fileName("RESUME") : null, letter: letter ? fileName("COVER_LETTER") : null }}
+      tailoringLatex={tailorLatexJobs.at(-1)?.id ?? null}
+      attachments={{
+        resume: resume || application.resumeFormat === "latex" ? fileName("RESUME") : null,
+        baseResume: resolveFileName(settings.fileNamePattern, { name: profile.basics.name, doc: DocumentKind.RESUME, date: new Date() }),
+        customResume: application.customResumeName,
+        resumeChoice: (application.resumeChoice as "tailored" | "base" | "custom") ?? "tailored",
+        letter: letter ? fileName("COVER_LETTER") : null,
+      }}
       gmail={
         google.status === "not-configured" && emails.length === 0
           ? undefined

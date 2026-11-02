@@ -9,10 +9,28 @@ import { BUILT_IN_THEMES } from "@/lib/themes";
 
 import { themeFile } from "@/lib/theme-file";
 
-import { deleteTheme, duplicateTheme, importTheme, saveTheme, setBaseTheme } from "./actions";
+import {
+  deleteTheme,
+  duplicateTheme,
+  generateBaseLatexFromProfile,
+  importTheme,
+  saveBaseLatex,
+  saveTheme,
+  setBaseTheme,
+  setResumeFormat,
+} from "./actions";
 import { ResumeWorkspace, type ResumeWorkspaceProps } from "./resume-workspace";
 
-vi.mock("./actions", () => ({ setBaseTheme: vi.fn(), saveTheme: vi.fn(), duplicateTheme: vi.fn(), deleteTheme: vi.fn(), importTheme: vi.fn() }));
+vi.mock("./actions", () => ({
+  setBaseTheme: vi.fn(),
+  saveTheme: vi.fn(),
+  duplicateTheme: vi.fn(),
+  deleteTheme: vi.fn(),
+  importTheme: vi.fn(),
+  setResumeFormat: vi.fn(),
+  saveBaseLatex: vi.fn(),
+  generateBaseLatexFromProfile: vi.fn(),
+}));
 vi.mock("@/components/toast", () => {
   const toast = vi.fn();
   return {
@@ -24,6 +42,10 @@ vi.mock("@/components/toast", () => {
     },
   };
 });
+
+vi.mock("@/lib/latex/actions", () => ({
+  compileLatexAction: vi.fn().mockResolvedValue({ ok: true, data: { success: true, heldId: "test-id" } }),
+}));
 
 const props: ResumeWorkspaceProps = {
   profile: demoProfile(),
@@ -202,6 +224,43 @@ describe("managing themes (E5-7)", () => {
     await user.upload(input, new File(["{\"hello\":1}"], "other.json", { type: "application/json" }));
     expect(toast).toHaveBeenCalledWith("That file isn't a Dossier theme.");
     expect(importTheme).toHaveBeenCalledTimes(1);
+  });
+
+  it("switches to custom LaTeX mode and renders the editor", async () => {
+    const user = userEvent.setup();
+    vi.mocked(setResumeFormat).mockResolvedValueOnce({ ok: true, data: { format: "latex" } });
+
+    render(<ResumeWorkspace {...props} initialLatex="\\begin{document}Hello\\end{document}" />);
+    expect(screen.getByRole("radio", { name: "Standard (Theme)" })).toBeChecked();
+
+    await user.click(screen.getByRole("radio", { name: "Custom LaTeX" }));
+    expect(setResumeFormat).toHaveBeenCalledWith({ format: "latex" });
+    expect(screen.getByRole("textbox", { name: "LaTeX source code editor" })).toBeInTheDocument();
+  });
+
+  it("generates LaTeX code from profile with confirmation", async () => {
+    const user = userEvent.setup();
+    vi.mocked(generateBaseLatexFromProfile).mockResolvedValueOnce({
+      ok: true,
+      data: { latex: "% Generated from profile\n\\begin{document}New\\end{document}" },
+    });
+
+    render(
+      <ResumeWorkspace
+        {...props}
+        initialFormat="latex"
+        initialLatex="\\begin{document}Old\\end{document}"
+      />,
+    );
+
+    const generateBtn = screen.getByRole("button", { name: "Generate from profile" });
+    await user.click(generateBtn);
+
+    // Confirm dialog appears
+    const confirmBtn = screen.getByRole("button", { name: "Generate and replace" });
+    await user.click(confirmBtn);
+
+    expect(generateBaseLatexFromProfile).toHaveBeenCalled();
   });
 });
 

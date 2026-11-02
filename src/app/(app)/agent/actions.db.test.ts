@@ -36,7 +36,7 @@ const candidate = (data: { status?: "SCORED" | "DRAFTED" | "DRAFTING"; applicati
   prisma().agentCandidate.create({
     data: { source: "JSEARCH", externalId: `job-${Math.random()}`, dedupeKey: `key-${Math.random()}`, title: "Data Scientist", company: "Ledgerly", url: "https://jobs.example/1", score: 88, reasons: ["Python"], ...data },
   });
-const query: SearchQuery = { keywords: "Data scientist", place: "", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" };
+const query: SearchQuery = { keywords: "Data scientist", place: "", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any", experienceLevel: "any" };
 
 beforeEach(async () => {
   Object.assign(setup, { ai: true, source: "JSEARCH" });

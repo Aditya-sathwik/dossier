@@ -4,14 +4,49 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { action, ActionError } from "@/lib/action";
+import { generateLatexFromProfile } from "@/lib/latex/template";
 import { prisma } from "@/lib/prisma";
-import { DEFAULT_BASE_THEME } from "@/lib/settings";
+import { loadProfile } from "@/lib/profile-data";
+import { DEFAULT_BASE_THEME, RESUME_FORMATS } from "@/lib/settings";
 import { loadSettings, saveSettings } from "@/lib/settings-data";
 import { THEME_FIELDS } from "@/lib/theme-data";
 import { parseThemeFile, themeFieldsSchema } from "@/lib/theme-file";
 import type { ThemeData } from "@/lib/themes";
 
 const THEME_GONE = "That theme doesn't exist anymore. Reload the page to see your themes.";
+
+/** Sets the base resume format: standard (theme) or latex (custom code). */
+export const setResumeFormat = action(
+  z.object({ format: z.enum(RESUME_FORMATS) }),
+  async ({ format }) => {
+    await saveSettings({ resumeFormat: format });
+    revalidatePath("/resume");
+    return { format };
+  },
+);
+
+/** Saves the base LaTeX resume code. */
+export const saveBaseLatex = action(
+  z.object({ latex: z.string().max(200_000) }),
+  async ({ latex }) => {
+    await saveSettings({ baseResumeLatex: latex });
+    revalidatePath("/resume");
+    return null;
+  },
+);
+
+/** Generates base LaTeX resume code from the user's profile and saves it. */
+export const generateBaseLatexFromProfile = action(
+  z.object({}),
+  async (_input, { toast }) => {
+    const [profile, settings] = await Promise.all([loadProfile(), loadSettings()]);
+    const latex = generateLatexFromProfile(profile, { paper: settings.paper });
+    await saveSettings({ baseResumeLatex: latex });
+    toast("Generated new base LaTeX resume from your profile.");
+    revalidatePath("/resume");
+    return { latex };
+  },
+);
 
 /** Makes a theme the base resume theme (RES-2). */
 export const setBaseTheme = action(z.object({ id: z.string().min(1) }), async ({ id }) => {

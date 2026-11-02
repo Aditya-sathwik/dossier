@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { RequirementComment } from "@/components/requirement-comment";
 import type { Match, MatchResult, Requirement } from "@/lib/application-data";
 import { matchScore } from "@/lib/application-data";
 import { cn } from "@/lib/cn";
@@ -20,11 +21,15 @@ export function MatchRows({
   match,
   requirements,
   onAddSkill,
+  onCommentChange,
+  readOnly = false,
 }: {
   match: Match;
   /** The extracted requirements, in the same order as the match's items. */
   requirements: Requirement[];
   onAddSkill: (index: number, skill: string) => void;
+  onCommentChange?: (index: number, requirement: string, comment?: string) => void;
+  readOnly?: boolean;
 }) {
   const { hit, total } = matchScore(match);
   return (
@@ -40,22 +45,32 @@ export function MatchRows({
           const { mark, label, className } = MARKS[item.result];
           const skill = requirements[index]?.kind === "skill" ? requirements[index].skill : null;
           return (
-            <li key={index} className="flex items-start gap-3.5 border-t border-line py-[13px]">
-              <span aria-hidden className={cn("grid size-[22px] flex-none place-items-center rounded-full border text-xs font-semibold", className)}>
-                {mark}
-              </span>
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <p className="text-field">
-                  <span className="sr-only">{label}: </span>
-                  {item.requirement}
-                </p>
-                {item.note && <p className="text-meta text-muted">{item.note}</p>}
+            <li key={index} className="flex flex-col gap-2 border-t border-line py-[13px]">
+              <div className="flex items-start gap-3.5">
+                <span aria-hidden className={cn("grid size-[22px] flex-none place-items-center rounded-full border text-xs font-semibold", className)}>
+                  {mark}
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <p className="text-field">
+                    <span className="sr-only">{label}: </span>
+                    {item.requirement}
+                  </p>
+                  {item.note && <p className="text-meta text-muted">{item.note}</p>}
+                </div>
+                {item.result === "gap" && skill && (
+                  <Button variant="secondary" size="sm" className="flex-none" onClick={() => onAddSkill(index, skill)}>
+                    + Add to profile
+                  </Button>
+                )}
               </div>
-              {item.result === "gap" && skill && (
-                <Button variant="secondary" size="sm" className="flex-none" onClick={() => onAddSkill(index, skill)}>
-                  + Add to profile
-                </Button>
-              )}
+              <div className="pl-[35px]">
+                <RequirementComment
+                  value={item.comment}
+                  readOnly={readOnly || !onCommentChange}
+                  onSave={(text) => onCommentChange?.(index, item.requirement, text)}
+                  onRemove={() => onCommentChange?.(index, item.requirement, undefined)}
+                />
+              </div>
             </li>
           );
         })}

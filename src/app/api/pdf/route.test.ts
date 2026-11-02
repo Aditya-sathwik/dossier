@@ -96,6 +96,30 @@ describe("GET /api/pdf", () => {
     expect(renderPdf).not.toHaveBeenCalled();
   });
 
+  it("downloads an application's custom resume", async () => {
+    const pdfBytes = Buffer.from("PDF-DATA").toString("base64");
+    vi.mocked(prisma.application.findUnique).mockResolvedValue({
+      customResumeName: "Jane_CV.pdf",
+      customResumeData: `data:application/pdf;base64,${pdfBytes}`,
+    } as never);
+
+    const response = await get("?doc=custom&application=app1");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toContain("Jane_CV.pdf");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array(Buffer.from("PDF-DATA")));
+  });
+
+  it("returns 404 if no custom resume exists", async () => {
+    vi.mocked(prisma.application.findUnique).mockResolvedValue({
+      customResumeName: null,
+      customResumeData: null,
+    } as never);
+
+    const response = await get("?doc=custom&application=app1");
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "This application has no custom resume uploaded." });
+  });
+
   it("never prints for an application that isn't there, or an id that isn't one", async () => {
     vi.mocked(prisma.application.findUnique).mockResolvedValue(null);
     expect((await get("?doc=resume&application=gone")).status).toBe(404);

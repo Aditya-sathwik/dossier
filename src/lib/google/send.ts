@@ -4,9 +4,11 @@ import { ApplicationStatus, DocumentKind, EmailDirection } from "@/generated/pri
 import { unitsSchema } from "@/lib/application-data";
 import { emailAddresses, emailParts } from "@/lib/application-email";
 import { resolveFileName } from "@/lib/file-name";
+import { baseLatexOrGenerated, latexSourceOf } from "@/lib/latex/base";
+import { renderLatexPdf, LatexRenderError } from "@/lib/latex/render";
 import { renderPdf } from "@/lib/pdf/render";
 import { prisma } from "@/lib/prisma";
-import { loadProfileName } from "@/lib/profile-data";
+import { loadProfile, loadProfileName } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 import { applyStatusChange } from "@/lib/status-changes";
 
@@ -51,12 +53,63 @@ export async function sendApplicationEmail(applicationId: string): Promise<SentA
 
   const [name, settings] = await Promise.all([loadProfileName(), loadSettings()]);
   const attachments: Attachment[] = [];
-  for (const { kind, path } of PRINTED) {
-    if (!application.documents.some((document) => document.kind === kind)) continue;
+
+  // Resume attachment according to the user's choice:
+  const resumeChoice = application.resumeChoice ?? "tailored";
+  if (resumeChoice === "custom" && application.customResumeData) {
+    const base64 = application.customResumeData.replace(/^data:[^;]+;base64,/, "");
     attachments.push({
-      fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: kind, date: new Date() }),
+      fileName: application.customResumeName || "Resume.pdf",
       contentType: "application/pdf",
-      data: await renderPdf(`/print/${path}/${applicationId}`),
+      data: Buffer.from(base64, "base64"),
+    });
+  } else if (resumeChoice === "base") {
+    const resumeFileName = resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: DocumentKind.RESUME, date: new Date() });
+    if (settings.resumeFormat === "latex") {
+      const profile = await loadProfile();
+      try {
+        attachments.push({
+          fileName: resumeFileName,
+          contentType: "application/pdf",
+          data: await renderLatexPdf(baseLatexOrGenerated(settings, profile)),
+        });
+      } catch (err) {
+        const msg = err instanceof LatexRenderError ? err.message : "Failed to compile base LaTeX resume.";
+        throw new GoogleError("unavailable", `Could not compile resume attachment: ${msg}`);
+      }
+    } else {
+      attachments.push({
+        fileName: resumeFileName,
+        contentType: "application/pdf",
+        data: await renderPdf("/print/base"),
+      });
+    }
+  } else if (application.resumeFormat === "latex") {
+    const profile = await loadProfile();
+    try {
+      attachments.push({
+        fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: DocumentKind.RESUME, date: new Date() }),
+        contentType: "application/pdf",
+        data: await renderLatexPdf(latexSourceOf(application, settings, profile)),
+      });
+    } catch (err) {
+      const msg = err instanceof LatexRenderError ? err.message : "Failed to compile tailored LaTeX resume.";
+      throw new GoogleError("unavailable", `Could not compile resume attachment: ${msg}`);
+    }
+  } else if (application.documents.some((document) => document.kind === DocumentKind.RESUME)) {
+    attachments.push({
+      fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: DocumentKind.RESUME, date: new Date() }),
+      contentType: "application/pdf",
+      data: await renderPdf(`/print/resume/${applicationId}`),
+    });
+  }
+
+  // Cover letter attachment:
+  if (application.documents.some((document) => document.kind === DocumentKind.COVER_LETTER)) {
+    attachments.push({
+      fileName: resolveFileName(settings.fileNamePattern, { name, company: application.company, role: application.role, doc: DocumentKind.COVER_LETTER, date: new Date() }),
+      contentType: "application/pdf",
+      data: await renderPdf(`/print/letter/${applicationId}`),
     });
   }
 

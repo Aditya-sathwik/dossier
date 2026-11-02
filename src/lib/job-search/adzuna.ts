@@ -7,7 +7,7 @@ import { fetchPosting } from "@/lib/posting-fetch";
 import type { JobSourceAdapter, RequestContext, SourceCredentials } from "./adapter";
 import { jobSearchError } from "./errors";
 import { requestJson } from "./http";
-import { POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "./search";
+import { EMPTY_QUERY, POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "./search";
 import { plainText } from "./text";
 
 // Adzuna (E14-2): its own job index in 19 countries, free with an app ID
@@ -75,8 +75,17 @@ function searchUrl(query: SearchQuery, { appId, key }: SourceCredentials["ADZUNA
   url.searchParams.set("app_id", appId);
   url.searchParams.set("app_key", key);
   url.searchParams.set("results_per_page", String(PAGE_SIZE));
-  // Adzuna has no remote filter: the word does what it can.
-  url.searchParams.set("what", query.remoteOnly ? `${query.keywords} remote` : query.keywords);
+  // Adzuna has no remote or experience filter: the words do what they can.
+  let what = query.keywords;
+  if (query.experienceLevel === "entry" && !/\b(junior|entry|intern)\b/i.test(what)) {
+    what = `${what} junior`;
+  } else if (query.experienceLevel === "senior" && !/\b(senior|sr\.?|lead|principal|staff)\b/i.test(what)) {
+    what = `${what} senior`;
+  } else if (query.experienceLevel === "mid" && !/\b(mid|intermediate)\b/i.test(what)) {
+    what = `${what} mid`;
+  }
+  if (query.remoteOnly) what = `${what} remote`;
+  url.searchParams.set("what", what);
   if (query.place) {
     url.searchParams.set("where", query.place);
     url.searchParams.set("distance", String(query.radiusKm));
@@ -114,6 +123,6 @@ export const adzuna: JobSourceAdapter<"ADZUNA"> = {
     return page.ok ? page.text : null;
   },
   test: async (credentials, context) => {
-    await searchPage({ keywords: "developer", place: "", country: "gb", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, credentials, null, context);
+    await searchPage({ ...EMPTY_QUERY, keywords: "developer", country: "gb" }, credentials, null, context);
   },
 };

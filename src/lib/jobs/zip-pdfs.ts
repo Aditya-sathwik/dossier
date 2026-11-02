@@ -10,9 +10,11 @@ import { z } from "zod";
 import { DocumentKind } from "@/generated/prisma/enums";
 import { env } from "@/lib/env";
 import { resolveFileName } from "@/lib/file-name";
+import { latexSourceOf } from "@/lib/latex/base";
+import { renderLatexPdf } from "@/lib/latex/render";
 import { renderPdf } from "@/lib/pdf/render";
 import { prisma } from "@/lib/prisma";
-import { loadProfileName } from "@/lib/profile-data";
+import { loadProfile, loadProfileName } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 
 import { defineJob } from "./runner";
@@ -85,14 +87,22 @@ export const zipPdfsJob = defineJob({
   async run(_input, { step, signal }) {
     const now = new Date();
     await removeOldZips(now.getTime());
-    const [applications, name, settings] = await Promise.all([
+    const [applications, name, settings, profile] = await Promise.all([
       prisma.application.findMany({
         where: { documents: { some: { kind: { in: PRINTED } } } },
         orderBy: { createdAt: "asc" },
-        select: { id: true, company: true, role: true, documents: { where: { kind: { in: PRINTED } }, select: { kind: true }, orderBy: { kind: "asc" } } },
+        select: {
+          id: true,
+          company: true,
+          role: true,
+          resumeFormat: true,
+          latexCode: true,
+          documents: { where: { kind: { in: PRINTED } }, select: { kind: true }, orderBy: { kind: "asc" } },
+        },
       }),
       loadProfileName(),
       loadSettings(),
+      loadProfile(),
     ]);
     const documents = applications.flatMap((application) => application.documents.map(({ kind }) => ({ application, kind })));
 
@@ -101,7 +111,16 @@ export const zipPdfsJob = defineJob({
     const rendered = await Promise.all(
       documents.map(async ({ application, kind }) => {
         signal.throwIfAborted();
-        const pdf = await renderPdf(`/print/${kind === DocumentKind.RESUME ? "resume" : "letter"}/${application.id}`);
+        let pdf: Uint8Array;
+        if (kind === DocumentKind.RESUME && application.resumeFormat === "latex") {
+          try {
+            pdf = await renderLatexPdf(latexSourceOf(application, settings, profile));
+          } catch {
+            pdf = await renderPdf(`/print/resume/${application.id}`);
+          }
+        } else {
+          pdf = await renderPdf(`/print/${kind === DocumentKind.RESUME ? "resume" : "letter"}/${application.id}`);
+        }
         done += 1;
         await step(`Rendered ${done} of ${documents.length}`);
         return { application, kind, pdf };

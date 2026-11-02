@@ -68,6 +68,9 @@ export const pagesInWords = (pages: number) => (pages === 1 ? "one page" : pages
 
 export const DEFAULT_BASE_THEME = "editorial";
 
+export const RESUME_FORMATS = ["standard", "latex"] as const;
+export type ResumeFormat = (typeof RESUME_FORMATS)[number];
+
 const flag = (fallback: boolean) => z.stringbool().catch(fallback);
 
 /** A value stored as JSON. */
@@ -131,6 +134,10 @@ export const settingsSchema = z.object({
   jobRetentionHours: z.coerce.number().refine(isJobRetention).catch(DEFAULT_JOB_RETENTION_HOURS),
   /** A theme's id. loadSettings() reads a deleted one as Editorial. */
   baseThemeId: z.string().catch(DEFAULT_BASE_THEME),
+  /** Resume format: "standard" (built-in HTML/theme) or "latex" (custom LaTeX code). */
+  resumeFormat: z.enum(RESUME_FORMATS).catch("standard"),
+  /** Base LaTeX resume code saved by the user. */
+  baseResumeLatex: z.string().catch(""),
   /** The Applications screen as last left (LST-7): view, filter and sort, e.g. "-match". */
   applicationsView: z.enum(["board", "table"]).catch("board"),
   applicationsFilter: z.enum(["all", "active", "closed"]).catch("all"),

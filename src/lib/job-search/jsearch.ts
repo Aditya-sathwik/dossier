@@ -6,7 +6,7 @@ import type { JobSourceAdapter, JSearchHost, RequestContext, SourceCredentials }
 import { countryName } from "./countries";
 import { jobSearchError } from "./errors";
 import { requestJson } from "./http";
-import { safeLink, type FoundPosting, type PostedWithin, type SearchPage, type SearchQuery } from "./search";
+import { EMPTY_QUERY, safeLink, type FoundPosting, type PostedWithin, type SearchPage, type SearchQuery } from "./search";
 
 // JSearch (E14-1): Google for Jobs through OpenWeb Ninja, or the same API on
 // RapidAPI. One search page is one request from the plan (200 a month free).
@@ -137,8 +137,14 @@ function keysOf(answer: unknown): string {
 }
 
 /** "designer in Hamburg": JSearch reads the place from the query text, as Google does. */
-function queryText({ keywords, place }: SearchQuery): string {
-  return place ? `${keywords} in ${place}` : keywords;
+function queryText({ keywords, place, experienceLevel }: SearchQuery): string {
+  let title = keywords;
+  if (experienceLevel === "entry" && !/\b(junior|entry|intern|graduate)\b/i.test(keywords)) {
+    title = `Junior ${keywords}`;
+  } else if (experienceLevel === "senior" && !/\b(senior|sr\.?|lead|principal|staff|head)\b/i.test(keywords)) {
+    title = `Senior ${keywords}`;
+  }
+  return place ? `${title} in ${place}` : title;
 }
 
 function searchUrl(query: SearchQuery, host: JSearchHost, next: string | null, baseUrl?: string): URL {
@@ -149,6 +155,11 @@ function searchUrl(query: SearchQuery, host: JSearchHost, next: string | null, b
   url.searchParams.set("date_posted", DATE_POSTED[query.postedWithin]);
   if (query.place) url.searchParams.set("radius", String(query.radiusKm));
   if (query.remoteOnly) url.searchParams.set("work_from_home", "true");
+  if (query.experienceLevel === "entry") {
+    url.searchParams.set("job_requirements", "under_3_years_experience");
+  } else if (query.experienceLevel === "mid" || query.experienceLevel === "senior") {
+    url.searchParams.set("job_requirements", "more_than_3_years_experience");
+  }
   // A page number kept in a past search from RapidAPI's old /search starts
   // over; Show more leaves out the postings it already has.
   if (next?.startsWith("cursor:")) url.searchParams.set("cursor", next.slice("cursor:".length));
@@ -185,6 +196,6 @@ export const jsearch: JobSourceAdapter<"JSEARCH"> = {
   // Search results carry the whole description.
   details: async (posting) => (posting.description ? posting.description : null),
   test: async (credentials, context) => {
-    await searchPage({ keywords: "developer", place: "", country: "us", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, credentials, null, context);
+    await searchPage({ ...EMPTY_QUERY, keywords: "developer", country: "us" }, credentials, null, context);
   },
 };

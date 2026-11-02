@@ -6,11 +6,16 @@ import { ChatRole, DocumentKind, VersionCause } from "@/generated/prisma/enums";
 import { getAiProvider } from "@/lib/ai";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { refineChat, type ChatTurn } from "@/lib/ai/tasks";
-import { extractedOf, unitsSchema, type Unit, type UnitEdit } from "@/lib/application-data";
+import { refineLatexResume } from "@/lib/ai/tasks/refine-latex-resume";
+import { extractedOf, matchSchema, unitsSchema, type Unit, type UnitEdit } from "@/lib/application-data";
+import { readJson } from "@/lib/application-documents";
 import { updateDocuments } from "@/lib/document-units";
 import { withoutPrivateParts } from "@/lib/letter-frame";
+import { latexSourceOf } from "@/lib/latex/base";
+import { compileLatex } from "@/lib/latex/compile";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts, loadProfile } from "@/lib/profile-data";
+import { loadSettings } from "@/lib/settings-data";
 import { unitName } from "@/lib/unit-text";
 
 import { defineJob } from "./runner";
@@ -46,6 +51,8 @@ export const refineJob = defineJob({
     messageId: z.string(),
     /** The units it changed, to show them. */
     edited: z.array(unitRef),
+    latex: z.string().optional(),
+    previousLatex: z.string().optional(),
   }),
   async run({ applicationId, messageId, request, target, viewing }, { step, signal }) {
     await step("Thinking");
@@ -71,6 +78,56 @@ export const refineJob = defineJob({
     const targetUnit = target && unitsOf(target.document).find((unit) => unit.id === target.unitId);
 
     const [provider, options, profile, facts] = await Promise.all([getAiProvider(), loadTaskOptions(), loadProfile(), loadFactTexts(applicationId)]);
+
+    // When on the resume tab with custom LaTeX, refine the LaTeX code directly
+    if (viewing === DocumentKind.RESUME && application.resumeFormat === "latex") {
+      const settings = await loadSettings();
+      const previousLatex = latexSourceOf(application, settings, profile);
+      const { data, promptVersion } = await refineLatexResume(
+        provider,
+        {
+          profile,
+          extracted: extractedOf(application),
+          match: readJson(matchSchema, application.match),
+          facts,
+          latexSource: previousLatex,
+          request,
+          history,
+        },
+        { ...options, language: application.language || options.language, signal },
+      );
+
+      // Verify compilation with Tectonic
+      await step("Compiling LaTeX preview");
+      const compiled = await compileLatex(data.latex, { signal });
+      if (!compiled.ok) {
+        throw new Error(`Refined LaTeX failed to compile: ${compiled.error}`);
+      }
+
+      // Save updated LaTeX code to Application
+      await prisma.application.update({
+        where: { id: applicationId },
+        data: { latexCode: data.latex },
+      });
+
+      const reply = await prisma.chatMessage.create({
+        data: {
+          applicationId,
+          role: ChatRole.AI,
+          text: data.reply,
+          writtenWith: promptVersion,
+        },
+        select: { id: true },
+      });
+
+      return {
+        messageId: reply.id,
+        edited: [{ document: DocumentKind.RESUME, unitId: "latex" }],
+        latex: data.latex,
+        previousLatex,
+      };
+    }
+
     const { data, promptVersion } = await refineChat(
       provider,
       {

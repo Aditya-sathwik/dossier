@@ -45,10 +45,11 @@ export function TailoringCard({
         </div>
       </div>
       <Textarea
-        label="Anything I should know?"
-        hint="Kept with the application as a fact for the AI. Change it later on its Job posting tab."
+        label="Combined comments & instructions for AI"
+        hint="Overall instructions that steer both your resume and cover letter. E.g. career narrative, emphasis, tone, or relocation."
         rows={3}
-        placeholder="e.g. I'm relocating to Amsterdam in January. Or: lean on my research work."
+        maxLength={2000}
+        placeholder="e.g. Emphasize my systems architecture and leadership experience; keep the cover letter concise and technical; lean on my open-source work..."
         value={note}
         onChange={(event) => onNote(event.target.value)}
       />

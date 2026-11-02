@@ -7,4 +7,24 @@ export const READ_POSTING_STEPS = [
   "Comparing it with your profile",
 ] as const;
 
-export const WRITE_DOCUMENTS_STEPS = ["Tailoring your resume", "Writing your cover letter", "Saving the application"] as const;
+export function writeDocumentsSteps({
+  hasComments,
+  latex,
+}: {
+  hasComments: boolean;
+  latex: boolean;
+}): readonly string[] {
+  return [
+    ...(hasComments ? ["Reading your comments and instructions"] : []),
+    ...(latex ? ["Tailoring your LaTeX resume", "Compiling LaTeX preview"] : ["Tailoring your resume"]),
+    "Writing your cover letter",
+    "Saving the application",
+  ];
+}
+
+/** Default steps for backwards compatibility when options are not known. */
+export const WRITE_DOCUMENTS_STEPS = [
+  "Tailoring your resume",
+  "Writing your cover letter",
+  "Saving the application",
+] as const;

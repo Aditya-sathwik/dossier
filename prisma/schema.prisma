@@ -430,6 +430,16 @@ model Application {
   /// The tailored resume follows its theme's layout, sidebar included; off
   /// means a single column (APP-4, decided in E5-1 #42).
   followThemeLayout   Boolean           @default(false)
+  /// Which resume to attach when sending: "tailored", "base", or "custom".
+  resumeChoice        String            @default("tailored")
+  /// Resume format for this application: "standard" (built-in HTML/theme) or "latex".
+  resumeFormat        String            @default("standard")
+  /// The application's customized LaTeX resume code.
+  latexCode           String?
+  /// The file name of an uploaded custom resume PDF.
+  customResumeName    String?
+  /// The base64 data URL of the uploaded custom resume PDF.
+  customResumeData    String?
   /// Whether the tailored resume shows the profile photo; null follows the
   /// profile's "Show on resumes" (#224).
   showPhoto           Boolean?

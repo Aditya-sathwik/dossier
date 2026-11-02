@@ -7,7 +7,7 @@ import { fetchPosting } from "@/lib/posting-fetch";
 import type { JobSourceAdapter, RequestContext } from "./adapter";
 import { jobSearchError } from "./errors";
 import { requestJson } from "./http";
-import { POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "./search";
+import { EMPTY_QUERY, POSTED_WITHIN, safeLink, type FoundPosting, type SearchPage, type SearchQuery } from "./search";
 import { FREEHIRE_URL } from "./sources";
 
 // FreeHire: ATS-direct catalogue over a public HTTP API (no key). Search
@@ -104,9 +104,15 @@ export function postingFromJob(job: Job): FoundPosting {
   };
 }
 
-/** "designer in Hamburg": FreeHire has no radius; place rides in the query text. */
-function queryText({ keywords, place }: SearchQuery): string {
-  return place ? `${keywords} in ${place}` : keywords;
+/** "designer in Hamburg": FreeHire has no radius; place and experience ride in the query text. */
+function queryText({ keywords, place, experienceLevel }: SearchQuery): string {
+  let text = keywords;
+  if (experienceLevel === "entry" && !/\b(junior|entry|intern)\b/i.test(text)) {
+    text = `junior ${text}`;
+  } else if (experienceLevel === "senior" && !/\b(senior|sr\.?|lead|principal|staff)\b/i.test(text)) {
+    text = `senior ${text}`;
+  }
+  return place ? `${text} in ${place}` : text;
 }
 
 function searchUrl(query: SearchQuery, offset: number, baseUrl?: string): URL {
@@ -159,6 +165,6 @@ export const freehire: JobSourceAdapter<"FREEHIRE"> = {
     return page.ok ? page.text : null;
   },
   test: async (_credentials, context) => {
-    await searchPage({ keywords: "developer", place: "", country: "us", radiusKm: 25, remoteOnly: false, postedWithin: "any" }, {}, null, context);
+    await searchPage({ ...EMPTY_QUERY, keywords: "developer", country: "us" }, {}, null, context);
   },
 };

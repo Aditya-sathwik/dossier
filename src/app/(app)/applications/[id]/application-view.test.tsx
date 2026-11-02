@@ -26,15 +26,29 @@ import {
   setApplicationTheme,
   setFollowThemeLayout,
   setShowPhoto,
+  setResumeChoice,
+  setApplicationResumeFormat,
+  saveApplicationLatex,
+  startTailoringLatex,
+  resetApplicationLatex,
   startRegenerating,
   startWritingEmail,
   undoEmailRewrite,
   undoMessage,
   updateNote,
+  uploadCustomResume,
+  removeCustomResume,
 } from "./actions";
 import { ApplicationView, type ApplicationViewProps } from "./application-view";
 
 vi.mock("./actions", () => ({
+  setResumeChoice: vi.fn(async () => ({ ok: true, data: null })),
+  setApplicationResumeFormat: vi.fn(async ({ format }: { format: string }) => ({ ok: true, data: { format } })),
+  saveApplicationLatex: vi.fn(async () => ({ ok: true, data: null })),
+  startTailoringLatex: vi.fn(async () => ({ ok: true, data: { jobId: "tailor-1", alreadyRunning: false } })),
+  resetApplicationLatex: vi.fn(async () => ({ ok: true, data: { latex: "\\begin{document}Reset\\end{document}" } })),
+  uploadCustomResume: vi.fn(async () => ({ ok: true, data: null, toast: "Uploaded “Custom.pdf” as your custom resume." })),
+  removeCustomResume: vi.fn(async () => ({ ok: true, data: null, toast: "Removed custom resume." })),
   setApplicationTheme: vi.fn(async () => ({ ok: true, data: null })),
   setFollowThemeLayout: vi.fn(async () => ({ ok: true, data: null })),
   setShowPhoto: vi.fn(async () => ({ ok: true, data: null })),
@@ -55,6 +69,9 @@ vi.mock("./actions", () => ({
   restoreVersion: vi.fn(async () => ({ ok: true, data: null, toast: "Restored the resume as it was then." })),
   startWritingEmail: vi.fn(async () => ({ ok: true, data: "email-1" })),
   undoEmailRewrite: vi.fn(async () => ({ ok: true, data: null })),
+}));
+vi.mock("@/lib/latex/actions", () => ({
+  compileLatexAction: vi.fn().mockResolvedValue({ ok: true, data: { success: true, heldId: "pdf-app-1" } }),
 }));
 vi.mock("@/lib/copy-text", () => ({ copyText: vi.fn(async () => true) }));
 vi.mock("@/lib/jobs/actions", () => ({ retry: vi.fn(async () => ({ ok: true, data: null })) }));
@@ -1039,5 +1056,118 @@ describe("the Email tab", () => {
     await user.click(screen.getByRole("button", { name: "History" }));
     expect(await screen.findByRole("heading", { name: "History of the email" })).toBeInTheDocument();
     expect(listVersions).toHaveBeenLastCalledWith({ id: "app-1", document: "EMAIL" });
+  });
+
+  it("switches between tailored, base, and custom resume", async () => {
+    const user = userEvent.setup();
+    render(
+      <ApplicationView
+        {...props}
+        initialTab="email"
+        email={email}
+        attachments={{
+          resume: "Jane Doe – Ledgerly – Resume.pdf",
+          baseResume: "Jane Doe – Resume.pdf",
+          letter: "Jane Doe – Ledgerly – Cover letter.pdf",
+        }}
+      />,
+    );
+
+    // Initial is tailored:
+    expect(screen.getByRole("link", { name: "Download Jane Doe – Ledgerly – Resume.pdf" })).toHaveAttribute(
+      "href",
+      "/api/pdf?doc=resume&application=app-1",
+    );
+
+    // Switch to Base:
+    await user.click(screen.getByRole("radio", { name: "Base" }));
+    expect(setResumeChoice).toHaveBeenCalledWith({ id: "app-1", choice: "base" });
+    expect(screen.getByRole("link", { name: "Download Jane Doe – Resume.pdf" })).toHaveAttribute(
+      "href",
+      "/api/pdf?doc=base",
+    );
+
+    // Switch to Custom:
+    await user.click(screen.getByRole("radio", { name: "Custom" }));
+    expect(setResumeChoice).toHaveBeenCalledWith({ id: "app-1", choice: "custom" });
+    expect(screen.getByRole("button", { name: "Upload PDF resume" })).toBeInTheDocument();
+  });
+
+  it("handles custom resume display and remove", async () => {
+    const user = userEvent.setup();
+    render(
+      <ApplicationView
+        {...props}
+        initialTab="email"
+        email={email}
+        attachments={{
+          resume: "Jane Doe – Ledgerly – Resume.pdf",
+          baseResume: "Jane Doe – Resume.pdf",
+          customResume: "My_Custom_CV.pdf",
+          resumeChoice: "custom",
+          letter: "Jane Doe – Ledgerly – Cover letter.pdf",
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Download My_Custom_CV.pdf" })).toHaveAttribute(
+      "href",
+      "/api/pdf?doc=custom&application=app-1",
+    );
+
+    // Click Remove:
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(removeCustomResume).toHaveBeenCalledWith({ id: "app-1" });
+  });
+
+  describe("LaTeX resume format in application", () => {
+    it("switches to custom LaTeX and allows tailoring with AI", async () => {
+      const user = userEvent.setup();
+      render(
+        <ApplicationView
+          {...props}
+          initialTab="resume"
+          application={{
+            ...props.application,
+            resumeFormat: "standard",
+            latexCode: "\\begin{document}App LaTeX\\end{document}",
+          }}
+        />,
+      );
+
+      // Switch to LaTeX
+      const latexRadio = screen.getByRole("radio", { name: "LaTeX" });
+      await user.click(latexRadio);
+      expect(setApplicationResumeFormat).toHaveBeenCalledWith({ id: "app-1", format: "latex" });
+
+      // In LaTeX mode, Tailor with AI button is present
+      const tailorBtn = screen.getByRole("button", { name: "Tailor with AI" });
+      await user.click(tailorBtn);
+      expect(startTailoringLatex).toHaveBeenCalledWith({ id: "app-1" });
+    });
+
+    it("resets application LaTeX to base template with confirmation dialog", async () => {
+      const user = userEvent.setup();
+      render(
+        <ApplicationView
+          {...props}
+          initialTab="resume"
+          application={{
+            ...props.application,
+            resumeFormat: "latex",
+            latexCode: "\\begin{document}Custom Tailored\\end{document}",
+          }}
+        />,
+      );
+
+      const resetBtn = screen.getByRole("button", { name: "Reset to base" });
+      await user.click(resetBtn);
+
+      // Confirmation dialog appears with "Reset to base" confirm action
+      const confirmBtns = screen.getAllByRole("button", { name: "Reset to base" });
+      await user.click(confirmBtns[confirmBtns.length - 1]);
+
+      expect(resetApplicationLatex).toHaveBeenCalledWith({ id: "app-1" });
+    });
   });
 });

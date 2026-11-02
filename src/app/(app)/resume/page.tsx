@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { baseLatexOrGenerated } from "@/lib/latex/base";
 import { loadProfile } from "@/lib/profile-data";
 import { maxPages } from "@/lib/settings";
 import { loadSettings } from "@/lib/settings-data";
@@ -22,6 +23,8 @@ export default async function BaseResumePage() {
       includeReferences={settings.includeRefs}
       language={settings.resumeLanguage}
       maxPages={maxPages(settings.pageLimit)}
+      initialFormat={settings.resumeFormat}
+      initialLatex={baseLatexOrGenerated(settings, profile)}
     />
   );
 }

@@ -6,19 +6,32 @@ import { useEffect, useRef, useState } from "react";
 import { DocumentPreview } from "@/components/documents/document-preview";
 import { DownloadPdfButton } from "@/components/documents/download-pdf-button";
 import { ResumeDocument } from "@/components/documents/resume-document";
+import { LatexWorkspace } from "@/components/latex/latex-workspace";
 import { PageHeader } from "@/components/page-header";
 import { toast, toastResult } from "@/components/toast";
-import { buttonClassName } from "@/components/ui/button";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PaperSize } from "@/generated/prisma/enums";
+import { useAutosave } from "@/hooks/use-autosave";
+import { cn } from "@/lib/cn";
 import type { ProfileData } from "@/lib/profile";
 import { saveFile } from "@/lib/save-file";
-import { pagesInWords } from "@/lib/settings";
+import { pagesInWords, type ResumeFormat } from "@/lib/settings";
 import { parseThemeFile, themeFile, themeFileName } from "@/lib/theme-file";
 import { PAPER_SIZES, type ThemeData } from "@/lib/themes";
 
-import { deleteTheme, duplicateTheme, importTheme, saveTheme, setBaseTheme } from "./actions";
+import {
+  deleteTheme,
+  duplicateTheme,
+  generateBaseLatexFromProfile,
+  importTheme,
+  saveBaseLatex,
+  saveTheme,
+  setBaseTheme,
+  setResumeFormat,
+} from "./actions";
 import { draftFrom, ThemeBuilder, type ThemeDraft } from "./theme-builder";
 import { ThemePicker } from "./theme-picker";
 
@@ -34,6 +47,10 @@ export type ResumeWorkspaceProps = {
   maxPages: number | null;
   /** Settings → "Base resume language", for its headings and dates; null for English. */
   language: string | null;
+  /** Active resume format: standard (theme) or latex (custom code). */
+  initialFormat?: ResumeFormat;
+  /** Initial LaTeX code for the base resume. */
+  initialLatex?: string;
 };
 
 type Panel = "themes" | "customize";
@@ -44,13 +61,54 @@ type Panel = "themes" | "customize";
  * shows it right away and saves it in the background; while you customise
  * one, the preview shows the draft.
  */
-export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThemeId, paper, includeReferences, maxPages, language }: ResumeWorkspaceProps) {
+export function ResumeWorkspace({
+  profile,
+  themes: initialThemes,
+  usage,
+  baseThemeId,
+  paper,
+  includeReferences,
+  maxPages,
+  language,
+  initialFormat,
+  initialLatex,
+}: ResumeWorkspaceProps) {
   const [themes, setThemes] = useState(initialThemes);
   const [baseId, setBaseId] = useState(baseThemeId);
   const [panel, setPanel] = useState<Panel>("themes");
   const [draft, setDraft] = useState<ThemeDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<ThemeData | null>(null);
+
+  const [format, setFormat] = useState<ResumeFormat>(initialFormat ?? "standard");
+  const [latexCode, setLatexCode] = useState<string>(initialLatex ?? "");
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  const { status } = useAutosave(latexCode, (code) => saveBaseLatex({ latex: code }));
+
+  const handleFormatChange = async (nextFormat: ResumeFormat) => {
+    const prev = format;
+    setFormat(nextFormat);
+    const result = toastResult(await setResumeFormat({ format: nextFormat }));
+    if (!result.ok) {
+      setFormat(prev);
+    }
+  };
+
+  const handleGenerateFromProfile = async () => {
+    setGenerating(true);
+    try {
+      const result = toastResult(await generateBaseLatexFromProfile({}));
+      if (result.ok) {
+        setLatexCode(result.data.latex);
+      }
+    } finally {
+      setGenerating(false);
+      setConfirmResetOpen(false);
+    }
+  };
+
   // The last base theme the server confirmed, to go back to if a save fails,
   // and the last one picked, so an older failure doesn't undo a newer pick.
   const savedId = useRef(baseThemeId);
@@ -155,86 +213,134 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
   };
 
   return (
-    <>
+    <div className="flex flex-1 flex-col">
       <PageHeader
+        compact={format === "latex"}
         title="Base resume"
-        description="Built straight from your profile. Every new application starts from this one, then gets tailored to the job."
+        description={
+          format === "standard"
+            ? "Built straight from your profile. Every new application starts from this one, then gets tailored to the job."
+            : undefined
+        }
         actions={
           <>
-            <Link href="/profile" className={buttonClassName("secondary")}>
-              Edit profile
-            </Link>
-            <DownloadPdfButton href="/api/pdf?doc=base">Download PDF</DownloadPdfButton>
+            <SegmentedControl<ResumeFormat>
+              name="resume-format"
+              options={[
+                { value: "standard", label: "Standard (Theme)" },
+                { value: "latex", label: "Custom LaTeX" },
+              ]}
+              value={format}
+              onValueChange={(val) => void handleFormatChange(val)}
+              size="sm"
+            />
+            {format === "standard" && (
+              <>
+                <Link href="/profile" className={buttonClassName("secondary")}>
+                  Edit profile
+                </Link>
+                <DownloadPdfButton href="/api/pdf?doc=base">Download PDF</DownloadPdfButton>
+              </>
+            )}
           </>
         }
       />
-      <div className="@container flex flex-1 flex-wrap border-t border-line">
-        <DocumentPreview
-          label={theme.name}
-          meta={(pages) => `${PAPER_SIZES[paper].label} · ${pages} ${pages === 1 ? "page" : "pages"}`}
-          notice={(pages) =>
-            empty ? (
-              // E11-4: an empty page needs a way forward.
-              <p role="note" className="rounded-card bg-card px-4 py-2.5 text-meta text-muted">
-                Your resume fills in from your profile. Add your name and a role or two, and it takes shape here.{" "}
-                <Link href="/profile" className="text-ink underline underline-offset-2">
-                  Go to your profile
-                </Link>
-              </p>
-            ) : (
-              maxPages !== null &&
-              pages > maxPages && (
-                <p role="note" className="rounded-card bg-warning-surface px-4 py-2.5 text-meta text-warning">
-                  Your base resume runs over {pagesInWords(maxPages)}. Tailored resumes are trimmed to fit, oldest roles first.{" "}
-                  <Link href="/settings?section=documents" className="font-medium text-warning underline underline-offset-2">
-                    Change the resume length
+      {format === "latex" ? (
+        <div className="flex-1 p-3 border-t border-line flex flex-col bg-canvas pb-8">
+          <LatexWorkspace
+            code={latexCode}
+            onChange={setLatexCode}
+            downloadHref="/api/pdf?doc=base"
+            saved={status === "saved" || status === "idle"}
+            actions={
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={generating}
+                onClick={() => setConfirmResetOpen(true)}
+              >
+                {generating ? "Generating…" : "Generate from profile"}
+              </Button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="@container flex flex-1 flex-wrap border-t border-line">
+          <DocumentPreview
+            label={theme.name}
+            meta={(pages) => `${PAPER_SIZES[paper].label} · ${pages} ${pages === 1 ? "page" : "pages"}`}
+            notice={(pages) =>
+              empty ? (
+                // E11-4: an empty page needs a way forward.
+                <p role="note" className="rounded-card bg-card px-4 py-2.5 text-meta text-muted">
+                  Your resume fills in from your profile. Add your name and a role or two, and it takes shape here.{" "}
+                  <Link href="/profile" className="text-ink underline underline-offset-2">
+                    Go to your profile
                   </Link>
                 </p>
+              ) : (
+                maxPages !== null &&
+                pages > maxPages && (
+                  <p role="note" className="rounded-card bg-warning-surface px-4 py-2.5 text-meta text-warning">
+                    Your base resume runs over {pagesInWords(maxPages)}. Tailored resumes are trimmed to fit, oldest roles first.{" "}
+                    <Link href="/settings?section=documents" className="font-medium text-warning underline underline-offset-2">
+                      Change the resume length
+                    </Link>
+                  </p>
+                )
               )
-            )
-          }
-        >
-          <ResumeDocument theme={theme} profile={profile} paper={paper} includeReferences={includeReferences} language={language} />
-        </DocumentPreview>
-        <aside
-          ref={panelArea}
-          aria-label="Theme"
-          className="flex flex-[1_0_300px] flex-col border-t border-line bg-paper px-7 pt-7 pb-12 @min-[780px]:border-t-0 @min-[780px]:border-l"
-        >
-          <Tabs value={panel} onValueChange={(value) => openPanel(value as Panel)} className="flex flex-col gap-6">
-            <TabsList variant="segmented">
-              <TabsTrigger value="themes">Themes</TabsTrigger>
-              <TabsTrigger value="customize">Customize</TabsTrigger>
-            </TabsList>
-            <TabsContent value="themes">
-              <ThemePicker
-                themes={themes}
-                activeId={theme.id}
-                userName={profile.basics.name.trim() || "Your name"}
-                onSelect={selectTheme}
-                onCustomize={() => openPanel("customize", true)}
-                actions={{
-                  duplicate: () => void duplicate(),
-                  exportFile,
-                  remove: () => setDeleting(base),
-                  importFile: (file) => void importFile(file),
-                }}
-              />
-            </TabsContent>
-            <TabsContent value="customize">
-              {draft && (
-                <ThemeBuilder
-                  draft={draft}
-                  onChange={setDraft}
-                  onSave={saveDraft}
-                  onCancel={() => openPanel("themes", true)}
-                  saving={saving}
+            }
+          >
+            <ResumeDocument theme={theme} profile={profile} paper={paper} includeReferences={includeReferences} language={language} />
+          </DocumentPreview>
+          <aside
+            ref={panelArea}
+            aria-label="Theme"
+            className="flex flex-[1_0_300px] flex-col border-t border-line bg-paper px-7 pt-7 pb-12 @min-[780px]:border-t-0 @min-[780px]:border-l"
+          >
+            <Tabs value={panel} onValueChange={(value) => openPanel(value as Panel)} className="flex flex-col gap-6">
+              <TabsList variant="segmented">
+                <TabsTrigger value="themes">Themes</TabsTrigger>
+                <TabsTrigger value="customize">Customize</TabsTrigger>
+              </TabsList>
+              <TabsContent value="themes">
+                <ThemePicker
+                  themes={themes}
+                  activeId={theme.id}
+                  userName={profile.basics.name.trim() || "Your name"}
+                  onSelect={selectTheme}
+                  onCustomize={() => openPanel("customize", true)}
+                  actions={{
+                    duplicate: () => void duplicate(),
+                    exportFile,
+                    remove: () => setDeleting(base),
+                    importFile: (file) => void importFile(file),
+                  }}
                 />
-              )}
-            </TabsContent>
-          </Tabs>
-        </aside>
-      </div>
+              </TabsContent>
+              <TabsContent value="customize">
+                {draft && (
+                  <ThemeBuilder
+                    draft={draft}
+                    onChange={setDraft}
+                    onSave={saveDraft}
+                    onCancel={() => openPanel("themes", true)}
+                    saving={saving}
+                  />
+                )}
+              </TabsContent>
+            </Tabs>
+          </aside>
+        </div>
+      )}
+      <ConfirmDialog
+        open={confirmResetOpen}
+        onOpenChange={setConfirmResetOpen}
+        title="Replace LaTeX resume with profile template?"
+        description="This will overwrite your existing base LaTeX resume code with a fresh template generated from your profile. Custom packages and edits will be replaced."
+        confirmLabel="Generate and replace"
+        onConfirm={() => void handleGenerateFromProfile()}
+      />
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
@@ -243,7 +349,7 @@ export function ResumeWorkspace({ profile, themes: initialThemes, usage, baseThe
         confirmLabel="Delete theme"
         onConfirm={() => deleting && void remove(deleting)}
       />
-    </>
+    </div>
   );
 }
 

@@ -9,18 +9,24 @@ import { plainUnit, type UnitRenderer } from "@/components/documents/document-pa
 import { DocumentPreview } from "@/components/documents/document-preview";
 import { DownloadPdfButton } from "@/components/documents/download-pdf-button";
 import { TailoredLetter, TailoredResume } from "@/components/documents/tailored-documents";
+import { LatexWorkspace } from "@/components/latex/latex-workspace";
 import { toast, toastResult } from "@/components/toast";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DocumentKind,
+  JobStatus,
   type ApplicationStatus,
   type DateFormat,
   type PaperSize,
   type Tone,
 } from "@/generated/prisma/enums";
+import { useAutosave } from "@/hooks/use-autosave";
 import { type Match, type Requirement, type Unit } from "@/lib/application-data";
 import { EMAIL_UNITS, WRITTEN_EMAIL_UNITS } from "@/lib/application-email";
+import { cn } from "@/lib/cn";
 import { documentLabels } from "@/lib/document-labels";
 import { defaultFrame, isFrameUnit, isParagraph, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import type { ActivityEntry } from "@/lib/activity";
@@ -32,6 +38,7 @@ import type { JobView } from "@/lib/jobs/runner";
 import type { WriteEmailResult } from "@/lib/jobs/write-email";
 import type { FactItem, ProfileData } from "@/lib/profile";
 import type { RefineSuggestions } from "@/lib/refine-suggestions";
+import type { ResumeFormat } from "@/lib/settings";
 import { hasSidebar, type ThemeData } from "@/lib/themes";
 import { cleanUnitText, isPublicationUnit, unitName } from "@/lib/unit-text";
 
@@ -39,14 +46,18 @@ import {
   addMatchSkill,
   leaveOutUnit,
   putBackTrimmed,
+  resetApplicationLatex,
   restoreUnit,
   restoreVersion,
+  saveApplicationLatex,
   saveUnit,
   sendMessage,
+  setApplicationResumeFormat,
   setApplicationTheme,
   setFollowThemeLayout,
   setShowPhoto,
   startRegenerating,
+  startTailoringLatex,
   startWritingEmail,
   undoEmailRewrite,
   undoMessage,
@@ -114,6 +125,8 @@ export type ApplicationViewProps = {
     awaitingReview?: boolean;
     /** The next interview, while in Interview (E9-9). */
     nextInterviewAt: Date | null;
+    resumeFormat?: ResumeFormat;
+    latexCode?: string | null;
   };
   /** The browser's time zone as it last told the server, for the interview's time. */
   timeZone?: string;
@@ -136,6 +149,8 @@ export type ApplicationViewProps = {
   email: Unit[] | null;
   /** The email being written, e.g. since before a reload. */
   writingEmail: string | null;
+  /** Tailoring LaTeX resume job running in the background. */
+  tailoringLatex?: string | null;
   /** The PDFs to attach to the email. */
   attachments: Attachments;
   /** Sending through Gmail (E15-2), and the application's mail (E15-3). */
@@ -181,6 +196,7 @@ export function ApplicationView({
   baseThemeId,
   email,
   writingEmail,
+  tailoringLatex,
   attachments,
   gmail,
   profile,
@@ -230,6 +246,61 @@ export function ApplicationView({
     Object.fromEntries(rewritingAtLoad.map(({ jobId, document, unitId }) => [keyOf(document, unitId), { jobId, revision: 0 }])),
   );
   const [emailJob, setEmailJob] = useState<Rewrite | null>(writingEmail ? { jobId: writingEmail, revision: 0 } : null);
+
+  const [resumeFormat, setResumeFormat] = useState<ResumeFormat>(application.resumeFormat ?? "standard");
+  const [latexCode, setLatexCode] = useState<string>(application.latexCode ?? "");
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+  const [latexJob, setLatexJob] = useState<Rewrite | null>(tailoringLatex ? { jobId: tailoringLatex, revision: 0 } : null);
+  const [showRefine, setShowRefine] = useState(false);
+
+  const { status: latexSaveStatus } = useAutosave(latexCode, (code) =>
+    saveApplicationLatex({ id: application.id, latex: code }),
+  );
+
+  const changeResumeFormat = async (format: ResumeFormat) => {
+    const prev = resumeFormat;
+    setResumeFormat(format);
+    const result = toastResult(await setApplicationResumeFormat({ id: application.id, format }));
+    if (!result.ok) {
+      setResumeFormat(prev);
+    }
+  };
+
+  const tailorLatex = async () => {
+    if (latexJob) return;
+    const result = toastResult(await startTailoringLatex({ id: application.id }));
+    if (result.ok) {
+      setLatexJob({ jobId: result.data.jobId, revision: 0 });
+    }
+  };
+
+  const resetLatex = async () => {
+    const result = toastResult(await resetApplicationLatex({ id: application.id }));
+    if (result.ok) {
+      setLatexCode(result.data.latex);
+      setConfirmResetOpen(false);
+    }
+  };
+
+  const latexJobChanged = (job: JobView<{ latex: string; previous: string; summary: string }>) => {
+    if (job.status === JobStatus.DONE && job.result) {
+      const { latex, previous, summary } = job.result;
+      setLatexCode(latex);
+      setLatexJob(null);
+      toast(summary || "Tailored your LaTeX resume for this position.", {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            setLatexCode(previous);
+            void saveApplicationLatex({ id: application.id, latex: previous });
+          },
+        },
+      });
+    } else if (job.status === JobStatus.FAILED) {
+      setLatexJob(null);
+      toast(job.error || "Failed to tailor LaTeX resume.");
+    }
+  };
 
   /** The document on screen, which a chat message without a target is most likely about. */
   const onScreen = (): DocumentKind | null =>
@@ -402,6 +473,22 @@ export function ApplicationView({
     if (job.status !== "DONE" || !job.result) return;
     setReply(null);
     startTransition(() => router.refresh());
+    if ("latex" in job.result && job.result.latex) {
+      setLatexCode(job.result.latex);
+      const prev = job.result.previousLatex;
+      toast("Refined your LaTeX resume.", {
+        action: prev
+          ? {
+              label: "Undo",
+              onClick: () => {
+                setLatexCode(prev);
+                void saveApplicationLatex({ id: application.id, latex: prev });
+              },
+            }
+          : undefined,
+      });
+      return;
+    }
     const { edited } = job.result;
     flashing.start(edited.map(({ document, unitId }) => keyOf(document, unitId)));
     // Show the change, on the other document if that's where it is.
@@ -488,6 +575,12 @@ export function ApplicationView({
       showUndoing(message.id);
       const result = await undoMessage({ id: application.id, messageId: message.id });
       if (!result.ok) return toast(result.error);
+      const latexEdit = result.data.edited.find(({ unitId }) => unitId === "latex");
+      if (latexEdit) {
+        toast("Put your previous LaTeX resume back.");
+        router.refresh();
+        return;
+      }
       flashing.start(result.data.edited.map(({ document, unitId }) => keyOf(document, unitId)));
     });
 
@@ -597,7 +690,14 @@ export function ApplicationView({
     // window: the document scrolls in its column and the panel keeps its input
     // in view. Narrower, the panel moves below and the page scrolls as usual.
     <div className="@container/page flex flex-1 flex-col">
-    <Tabs value={tab} onValueChange={selectTab} className="flex flex-1 flex-col @min-[780px]/page:h-panel @min-[780px]/page:flex-none">
+    <Tabs
+      value={tab}
+      onValueChange={selectTab}
+      className={cn(
+        "flex flex-1 flex-col",
+        !(tab === "resume" && resumeFormat === "latex") && "@min-[780px]/page:h-panel @min-[780px]/page:flex-none",
+      )}
+    >
       {Object.entries(rewrites).map(([key, { jobId, revision }]) =>
         jobId ? (
           <JobWatcher<RegenerateUnitResult>
@@ -615,6 +715,14 @@ export function ApplicationView({
       {emailJob?.jobId && (
         <JobWatcher<WriteEmailResult> key={emailJob.jobId} id={emailJob.jobId} revision={emailJob.revision} onChange={emailChanged} />
       )}
+      {latexJob?.jobId && (
+        <JobWatcher<{ latex: string; previous: string; summary: string }>
+          key={latexJob.jobId}
+          id={latexJob.jobId}
+          revision={latexJob.revision}
+          onChange={latexJobChanged}
+        />
+      )}
       <ApplicationHeader
         title={application.title}
         meta={meta}
@@ -627,7 +735,7 @@ export function ApplicationView({
               </Link>
             )}
             <StatusControl id={application.id} status={application.status} interviewAt={application.nextInterviewAt} timeZone={timeZone} />
-            {(resume || letter) && (
+            {(resume || letter || resumeFormat === "latex") && (
               // The document on screen; from the Job posting tab, the resume (E8-8).
               <DownloadPdfButton
                 variant="secondary"
@@ -658,7 +766,53 @@ export function ApplicationView({
 
       <div className="@container flex min-h-0 flex-1 flex-wrap @min-[780px]/page:flex-nowrap">
         <TabsContent value="resume" className="flex min-h-0 min-w-0 flex-[999_1_480px]">
-          {resume && resumeTheme && resumeUnits ? (
+          {resumeFormat === "latex" ? (
+            <div className="flex-1 p-3 border-t border-line flex flex-col bg-canvas overflow-y-auto pb-8">
+              <LatexWorkspace
+                code={latexCode}
+                onChange={setLatexCode}
+                downloadHref={`/api/pdf?doc=resume&application=${application.id}`}
+                saved={latexSaveStatus === "saved" || latexSaveStatus === "idle"}
+                actions={
+                  <div className="flex items-center gap-2">
+                    <SegmentedControl<ResumeFormat>
+                      name="app-resume-format"
+                      options={[
+                        { value: "standard", label: "Standard" },
+                        { value: "latex", label: "LaTeX" },
+                      ]}
+                      value={resumeFormat}
+                      onValueChange={(val) => void changeResumeFormat(val)}
+                      size="sm"
+                    />
+                    <Button
+                      variant={showRefine ? "primary" : "secondary"}
+                      size="sm"
+                      onClick={() => setShowRefine(!showRefine)}
+                    >
+                      {showRefine ? "Hide AI chat" : "✨ Refine with AI"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={latexJob !== null}
+                      onClick={() => void tailorLatex()}
+                    >
+                      {latexJob ? "Tailoring with AI…" : "Tailor with AI"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={latexJob !== null}
+                      onClick={() => setConfirmResetOpen(true)}
+                    >
+                      Reset to base
+                    </Button>
+                  </div>
+                }
+              />
+            </div>
+          ) : resume && resumeTheme && resumeUnits ? (
             <DocumentPreview
               meta={viewed(DocumentKind.RESUME) ? undefined : hint}
               notice={
@@ -670,6 +824,16 @@ export function ApplicationView({
               }
               label={
                 <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <SegmentedControl<ResumeFormat>
+                    name="app-resume-format"
+                    options={[
+                      { value: "standard", label: "Standard" },
+                      { value: "latex", label: "LaTeX" },
+                    ]}
+                    value={resumeFormat}
+                    onValueChange={(val) => void changeResumeFormat(val)}
+                    size="sm"
+                  />
                   <span className="flex items-center gap-1">Tailored resume · {themeMenu(resumeTheme)}</span>
                   {hasSidebar(resumeTheme.layout) && (
                     <PreviewSwitch label="Sidebar layout" checked={followLayout} onCheckedChange={changeLayout} />
@@ -691,7 +855,19 @@ export function ApplicationView({
               />
             </DocumentPreview>
           ) : (
-            <MissingDocument>This application has no tailored resume.</MissingDocument>
+            <div className="flex flex-1 flex-col items-center justify-center p-8 gap-4 bg-canvas">
+              <SegmentedControl<ResumeFormat>
+                name="app-resume-format"
+                options={[
+                  { value: "standard", label: "Standard" },
+                  { value: "latex", label: "LaTeX" },
+                ]}
+                value={resumeFormat}
+                onValueChange={(val) => void changeResumeFormat(val)}
+                size="sm"
+              />
+              <MissingDocument>This application has no tailored resume.</MissingDocument>
+            </div>
           )}
         </TabsContent>
 
@@ -770,34 +946,54 @@ export function ApplicationView({
             setHistoryOf(null);
           }}
         />
-        <RefinePanel
-          tab={tab}
-          messages={[...messages, ...sending]}
-          thinking={reply !== null}
-          suggestions={tab === "resume" ? suggestions.resume : tab === "letter" ? suggestions.letter : tab === "email" && email ? suggestions.email : []}
-          target={target}
-          onClearTarget={() => setTarget(null)}
-          onSend={send}
-          aiReady={aiReady}
-          focusRequest={chatFocus}
-        >
-          {(message) =>
-            message.canUndo &&
-            (message.undone || undoing.includes(message.id) ? (
-              <span className="px-1 text-label text-muted">Undone</span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => undo(message)}
-                className="px-1 text-label text-muted underline underline-offset-3 hover:text-ink"
-              >
-                Undo
-              </button>
-            ))
-          }
-        </RefinePanel>
+        {(!(tab === "resume" && resumeFormat === "latex") || showRefine) && (
+          <RefinePanel
+            tab={tab}
+            messages={[...messages, ...sending]}
+            thinking={reply !== null}
+            suggestions={
+              tab === "resume"
+                ? (resumeFormat === "latex"
+                    ? ["Make the summary shorter", "Emphasize leadership", "Highlight key skills", "Format experience cleanly"]
+                    : suggestions.resume)
+                : tab === "letter"
+                  ? suggestions.letter
+                  : tab === "email" && email
+                    ? suggestions.email
+                    : []
+            }
+            target={target}
+            onClearTarget={() => setTarget(null)}
+            onSend={send}
+            aiReady={aiReady}
+            focusRequest={chatFocus}
+          >
+            {(message) =>
+              message.canUndo &&
+              (message.undone || undoing.includes(message.id) ? (
+                <span className="px-1 text-label text-muted">Undone</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => undo(message)}
+                  className="px-1 text-label text-muted underline underline-offset-3 hover:text-ink"
+                >
+                  Undo
+                </button>
+              ))
+            }
+          </RefinePanel>
+        )}
       </div>
     </Tabs>
+    <ConfirmDialog
+      open={confirmResetOpen}
+      onOpenChange={setConfirmResetOpen}
+      title="Reset to base LaTeX resume?"
+      description="This will replace this application's custom LaTeX resume with your base LaTeX resume template. Any application-specific LaTeX customizations will be discarded."
+      confirmLabel="Reset to base"
+      onConfirm={() => void resetLatex()}
+    />
     </div>
   );
 }

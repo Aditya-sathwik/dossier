@@ -213,7 +213,8 @@ describe("tailorResume", () => {
     await tailorResume(provider, { profile: { ...profile, facts: [{ id: "f1", text: "  " }] }, extracted, match: null, facts: [], posting }, options);
     const text = prompt(provider);
     expect(text).not.toContain("factsAboutMe");
-    expect(text).not.toContain("What the candidate tells you");
+    expect(sent(provider).system).not.toContain("The candidate's facts");
+    expect(sent(provider).messages[0].content).not.toContain("What the candidate tells you");
   });
 
   it("returns units, keeping only real roles and the profile's own skills (APP-4)", async () => {
@@ -254,6 +255,26 @@ describe("tailorResume", () => {
     expect(text).toContain(`"publications": [\n    "Doe, J., & Vermeer, K. (2016). Trust in automated scheduling`);
     expect(text).not.toContain("10.5555");
     expect(text).not.toContain("Kept off resumes");
+  });
+
+  it("includes candidate comments and RESUME_COMMENT_RULES in the prompt", async () => {
+    const matchWithComment: Match = {
+      items: [
+        {
+          requirement: "Experience with Rust",
+          result: "gap",
+          skill: null,
+          experienceIds: [],
+          note: "Not in your profile",
+          comment: "I built an open-source CLI in Rust",
+        },
+      ],
+    };
+    const provider = model(answer);
+    await tailorResume(provider, { profile, extracted, match: matchWithComment, facts: ["Candidate fact note"], posting }, options);
+    expect(sent(provider).system).toContain("take precedence over \"not in profile\"");
+    expect(sent(provider).system).toMatch(/In the resume, weave in candidate comments/);
+    expect(prompt(provider)).toContain('"candidateComment": "I built an open-source CLI in Rust"');
   });
 
   it("names language levels in the resume's language: the chosen one, or the posting's", async () => {
@@ -349,6 +370,26 @@ describe("writeCoverLetter", () => {
   it("keeps the model's sign-off in another language", async () => {
     const { data } = await writeCoverLetter(model({ ...answer, signOff: "Met vriendelijke groet," }), { profile, extracted, match: null, tone: "WARM", facts: [], posting }, { ...options, language: "Dutch" });
     expect(data.at(-1)).toEqual({ id: "sign-off", label: "Sign-off", text: "Met vriendelijke groet," });
+  });
+
+  it("includes candidate comments and COVER_LETTER_COMMENT_RULES in the prompt", async () => {
+    const matchWithComment: Match = {
+      items: [
+        {
+          requirement: "Experience with Rust",
+          result: "gap",
+          skill: null,
+          experienceIds: [],
+          note: "Not in your profile",
+          comment: "I built an open-source CLI in Rust",
+        },
+      ],
+    };
+    const provider = model(answer);
+    await writeCoverLetter(provider, { profile, extracted, match: matchWithComment, tone: "WARM", facts: ["Candidate fact note"], posting }, options);
+    expect(sent(provider).system).toContain("take precedence over \"not in profile\"");
+    expect(sent(provider).system).toMatch(/In the cover letter, if a requirement is marked as a gap/);
+    expect(prompt(provider)).toContain('"candidateComment": "I built an open-source CLI in Rust"');
   });
 });
 

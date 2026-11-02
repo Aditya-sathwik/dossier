@@ -4,7 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import type { Country } from "@/lib/job-search/countries";
-import { POSTED_WITHIN, RADII_KM, type JobSource, type RadiusKm, type SearchQuery } from "@/lib/job-search/search";
+import { EXPERIENCE_LEVELS, POSTED_WITHIN, RADII_KM, type ExperienceLevel, type JobSource, type RadiusKm, type SearchQuery } from "@/lib/job-search/search";
 import { SOURCE_INFO, sourceCovers } from "@/lib/job-search/sources";
 
 // A search's fields, as Find jobs asks them (E14-6) and Settings → Job agent
@@ -55,6 +55,17 @@ export function SearchFields({
         {countries.map((country) => (
           <option key={country.code} value={country.code}>
             {country.name}
+          </option>
+        ))}
+      </Select>
+      <Select
+        label="Experience"
+        value={value.experienceLevel ?? "any"}
+        onChange={(event) => onChange({ experienceLevel: event.target.value as ExperienceLevel })}
+      >
+        {EXPERIENCE_LEVELS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </Select>

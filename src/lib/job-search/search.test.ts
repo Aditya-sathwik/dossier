@@ -23,10 +23,15 @@ import {
 
 describe("search in the URL", () => {
   it("round-trips a search", () => {
-    const query = { keywords: "product designer", place: "Hamburg", country: "de", radiusKm: 50 as const, remoteOnly: true, postedWithin: "week" as const };
+    const query = { keywords: "product designer", place: "Hamburg", country: "de", radiusKm: 50 as const, remoteOnly: true, postedWithin: "week" as const, experienceLevel: "any" as const };
     const href = searchHref(query);
     expect(href).toBe("/jobs?q=product+designer&where=Hamburg&country=de&radius=50&remote=1&posted=week");
     expect(queryFromParams(Object.fromEntries(new URL(href, "http://x").searchParams))).toEqual(query);
+
+    const seniorQuery = { ...query, experienceLevel: "senior" as const };
+    const seniorHref = searchHref(seniorQuery);
+    expect(seniorHref).toBe("/jobs?q=product+designer&where=Hamburg&country=de&radius=50&remote=1&posted=week&experience=senior");
+    expect(queryFromParams(Object.fromEntries(new URL(seniorHref, "http://x").searchParams))).toEqual(seniorQuery);
   });
 
   it("leaves defaults out of the URL", () => {

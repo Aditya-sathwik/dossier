@@ -23,6 +23,7 @@ export function JobProgress({
   onRetry,
   onBack,
   backLabel = "← Back to the posting",
+  children,
 }: {
   title: string;
   steps: readonly string[];
@@ -32,6 +33,7 @@ export function JobProgress({
   onRetry: () => void;
   onBack: () => void;
   backLabel?: string;
+  children?: React.ReactNode;
 }) {
   return (
     <Card className="flex flex-col gap-[22px] px-9 py-10">
@@ -40,6 +42,7 @@ export function JobProgress({
         {title}
       </h2>
       <ProgressSteps steps={steps} current={current} />
+      {children}
       {error ? (
         <div role="alert" className="flex flex-col gap-3.5">
           <p className="text-control text-error">{error}</p>

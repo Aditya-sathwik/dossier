@@ -180,6 +180,7 @@ export function createDossierServer(origin: string): McpServer {
         radiusKm: input.radius_km ?? DEFAULT_RADIUS_KM,
         remoteOnly,
         postedWithin: input.posted_within ?? "month",
+        experienceLevel: "any",
       };
       const ran = await runSearch(query);
       if (!ran.ok) return failure(ran.message);

@@ -118,7 +118,13 @@ export const matchItemSchema = z.object({
   experienceIds: z.array(z.string()),
   /** A short explanation, e.g. "Nothing in your profile, so I'll address it honestly in the letter". */
   note: z.string().nullable(),
+  /** Candidate-provided steering comment or context for this requirement. */
+  comment: z.string().trim().max(1000).optional(),
 });
+
+/** Schema for matching LLM return shape — strictly omits candidate comment. */
+export const generatedMatchItemSchema = matchItemSchema.omit({ comment: true });
+export const generatedMatchSchema = z.object({ items: z.array(generatedMatchItemSchema) });
 
 /** Application.match */
 export const matchSchema = z.object({ items: z.array(matchItemSchema) });

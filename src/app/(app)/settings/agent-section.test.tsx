@@ -12,7 +12,7 @@ vi.mock("@/components/toast", () => ({ toast: vi.fn(), toastResult: (result: { o
 
 const initial: AgentSettings = {
   enabled: false,
-  query: { keywords: "Data scientist", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any" },
+  query: { keywords: "Data scientist", place: "Berlin", country: "de", radiusKm: 25, remoteOnly: false, postedWithin: "any", experienceLevel: "any" },
   hour: 7,
   minScore: 70,
   maxScores: 15,

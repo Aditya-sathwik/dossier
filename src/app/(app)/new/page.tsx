@@ -44,6 +44,8 @@ export default async function NewApplicationPage({ searchParams }: PageProps<"/n
       }
       // A first-run helper: only until the first application exists (E7-1).
       samplePosting={applications === 0 ? DEMO_POSTING : null}
+      resumeFormat={settings.resumeFormat}
+      baseResumeLatex={settings.baseResumeLatex}
     />
   );
 }

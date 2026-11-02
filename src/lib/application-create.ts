@@ -136,6 +136,8 @@ export async function createApplicationFromDocuments({ reading, documents, match
         match,
         matchedWith,
         tone,
+        resumeFormat: settings.resumeFormat,
+        latexCode: documents.latex ?? (settings.resumeFormat === "latex" ? (settings.baseResumeLatex || null) : null),
         // "Anything I should know?" becomes the application's first fact (APP-15).
         ...(note.trim() ? { facts: { create: { text: note.trim() } } } : {}),
         language,

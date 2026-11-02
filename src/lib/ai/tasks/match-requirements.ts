@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { matchSchema, type Extracted, type Match } from "@/lib/application-data";
+import { generatedMatchSchema, type Extracted, type Match } from "@/lib/application-data";
 import { experienceMonths, formatMonthYear, languageLevelLabel, sameName, type ProfileData } from "@/lib/profile";
 
 import { system, UNTRUSTED_POSTING, type Task } from "./prompt-parts";
@@ -59,7 +59,7 @@ export const matchRequirements: Task<MatchInput, Match> = async (provider, { req
 
   const mapped = new Map(answer.matches.map((match) => [match.requirement, match]));
   return {
-    data: matchSchema.parse({
+    data: generatedMatchSchema.parse({
       items: requirements.map((requirement, index) => classify(requirement, mapped.get(index), profile, today)),
     }),
     promptVersion: MATCH_REQUIREMENTS_VERSION,
