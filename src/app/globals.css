@@ -150,10 +150,28 @@
    scrollbar-color (Safari) keep their own, which are thin already. */
 @utility scrollbar-subtle {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-ink) 20%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--color-ink) 25%, transparent) transparent;
 
   &:hover {
-    scrollbar-color: color-mix(in srgb, var(--color-ink) 36%, transparent) transparent;
+    scrollbar-color: color-mix(in srgb, var(--color-ink) 45%, transparent) transparent;
+  }
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-ink) 25%, transparent);
+    border-radius: 9999px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--color-ink) 45%, transparent);
   }
 }
 

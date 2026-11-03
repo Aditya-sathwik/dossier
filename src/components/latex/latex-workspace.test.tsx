@@ -125,4 +125,81 @@ describe("LatexWorkspace", () => {
 
     expect(await screen.findByText(/Tectonic LaTeX Compiler Missing/i)).toBeInTheDocument();
   });
+
+  it("renders review mode when pendingProposal is provided and allows applying changes", async () => {
+    const user = userEvent.setup();
+    vi.mocked(compileLatexAction).mockResolvedValue({
+      ok: true,
+      data: { success: true, heldId: "pdf-applied", cached: false },
+    });
+
+    const baseLatex = "\\documentclass{article}\n\\begin{document}\nLine 1: Old\n\\end{document}";
+    const onChange = vi.fn();
+    const onApplyProposal = vi.fn();
+
+    const proposal = {
+      baseLatex,
+      hunks: [
+        {
+          id: "hunk-1",
+          reason: "Update line 1",
+          oldText: "Line 1: Old",
+          newText: "Line 1: Tailored",
+          start: baseLatex.indexOf("Line 1: Old"),
+          end: baseLatex.indexOf("Line 1: Old") + "Line 1: Old".length,
+          oldStartLine: 3,
+          newStartLine: 3,
+        },
+      ],
+    };
+
+    const { rerender } = render(
+      <LatexWorkspace
+        code={baseLatex}
+        onChange={onChange}
+        downloadHref="/api/pdf?doc=base"
+        pendingProposal={proposal}
+        onApplyProposal={onApplyProposal}
+      />,
+    );
+
+    // Shows review mode indicator and diff viewer
+    expect(screen.getByText("Reviewing AI suggestions")).toBeInTheDocument();
+    expect(screen.getByText("AI Proposed Changes")).toBeInTheDocument();
+    expect(screen.getByText("Update line 1")).toBeInTheDocument();
+
+    // Wait for initial compilation on mount to settle
+    const applyBtn = await screen.findByRole("button", { name: /Done \/ Apply/i });
+    await user.click(applyBtn);
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.stringContaining("Line 1: Tailored"),
+    );
+    expect(onApplyProposal).toHaveBeenCalledWith(
+      expect.stringContaining("Line 1: Tailored"),
+    );
+    expect(compileLatexAction).toHaveBeenCalledWith({
+      latex: expect.stringContaining("Line 1: Tailored"),
+    });
+
+    // Rerender after proposal applied (pendingProposal = null, code updated)
+    rerender(
+      <LatexWorkspace
+        code="\\documentclass{article}\n\\begin{document}\nLine 1: Tailored\n\\end{document}"
+        onChange={onChange}
+        downloadHref="/api/pdf?doc=base"
+        pendingProposal={null}
+        onApplyProposal={onApplyProposal}
+      />,
+    );
+
+    // Undo button is now available
+    const undoBtn = screen.getByRole("button", { name: /Undo AI changes/i });
+    expect(undoBtn).toBeInTheDocument();
+
+    // Click Undo
+    await user.click(undoBtn);
+    expect(onChange).toHaveBeenCalledWith(baseLatex);
+    expect(compileLatexAction).toHaveBeenCalledWith({ latex: baseLatex });
+  });
 });

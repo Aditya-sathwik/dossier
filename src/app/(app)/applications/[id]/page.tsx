@@ -20,6 +20,7 @@ import { latexSourceOf } from "@/lib/latex/base";
 import { refineSuggestions } from "@/lib/refine-suggestions";
 import { loadThemes } from "@/lib/theme-data";
 import { userTimeZone } from "@/lib/time-zone";
+import { deriveTailoringPrefill } from "@/lib/latex/tailoring-prefill";
 
 import { ApplicationView } from "./application-view";
 import { metaLine } from "./meta";
@@ -41,7 +42,9 @@ export async function generateMetadata({ params }: PageProps<"/applications/[id]
 
 /** One application (PRD §6.5): its status, tailored documents, email, posting and notes. */
 export default async function ApplicationPage({ params, searchParams }: PageProps<"/applications/[id]">) {
-  const [{ id }, { tab }] = await Promise.all([params, searchParams]);
+  const [{ id }, search] = await Promise.all([params, searchParams]);
+  const tab = typeof search.tab === "string" ? search.tab : undefined;
+  const tailor = search.tailor === "1" || search.tailor === "true";
   await pullCalendar(id);
   const [{ application, profile, settings, extracted, resume, letter, email, includeReferences, letterDate }, aiReady, unitJobs, refineJobs, emailJobs, tailorLatexJobs, timeZone, google, emails, themes] =
     await Promise.all([
@@ -80,6 +83,10 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
   // The PDFs to attach to the email, named as they'll download (SET-8).
   const fileName = (doc: "RESUME" | "COVER_LETTER") =>
     resolveFileName(settings.fileNamePattern, { name: profile.basics.name, company: application.company, role: application.role, doc, date: new Date() });
+
+  const isLatex = application.resumeFormat === "latex";
+  const autoOpenTailor = Boolean(tailor && isLatex);
+  const tailoringPrefill = autoOpenTailor ? deriveTailoringPrefill(match, application.facts) : "";
 
   return (
     <ApplicationView
@@ -157,6 +164,8 @@ export default async function ApplicationPage({ params, searchParams }: PageProp
         tone,
         hasSummary: Boolean(resume?.units.some((unit) => unit.id === "summary" && unit.text.trim())),
       })}
+      autoOpenTailor={autoOpenTailor}
+      tailoringPrefill={tailoringPrefill}
     />
   );
 }

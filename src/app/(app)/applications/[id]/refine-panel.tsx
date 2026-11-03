@@ -49,6 +49,8 @@ export function RefinePanel({
   onSend,
   aiReady,
   focusRequest,
+  draft: externalDraft,
+  onDraftChange,
   children,
 }: {
   tab: Tab;
@@ -63,14 +65,31 @@ export function RefinePanel({
   aiReady: boolean;
   /** Goes up when the box should take focus, e.g. after "Ask AI". */
   focusRequest: number;
+  /** Draft text prefilled or controlled externally. */
+  draft?: string;
+  onDraftChange?: (text: string) => void;
   /** Under each message, by id: e.g. its Undo link (E8-6). */
   children?: (message: ChatEntry) => ReactNode;
 }) {
-  const [draft, setDraft] = useState("");
+  const [internalDraft, setInternalDraft] = useState("");
+  const isControlled = externalDraft !== undefined;
+  const draft = isControlled ? externalDraft : internalDraft;
+  const setDraft = (text: string) => {
+    if (isControlled) {
+      onDraftChange?.(text);
+    } else {
+      setInternalDraft(text);
+    }
+  };
+
   const input = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (focusRequest > 0) input.current?.focus();
+    if (focusRequest > 0) {
+      input.current?.focus();
+      const len = input.current?.value.length ?? 0;
+      input.current?.setSelectionRange(len, len);
+    }
   }, [focusRequest]);
 
   const send = async (text: string) => {
@@ -82,10 +101,10 @@ export function RefinePanel({
   return (
     <aside
       aria-labelledby="refine-heading"
-      className="flex-[1_0_300px] border-t border-line bg-paper @min-[780px]:border-t-0 @min-[780px]:border-l"
+      className="flex-[1_0_320px] max-w-[440px] border-t border-line bg-paper @min-[780px]:border-t-0 @min-[780px]:border-l @min-[780px]:h-full @min-[780px]:max-h-[calc(100dvh-120px)] @min-[780px]:sticky @min-[780px]:top-[128px]"
     >
-      <div className="flex h-[min(100dvh,680px)] flex-col @min-[780px]:h-full">
-        <div className="flex flex-col gap-1 px-6 pt-[26px] pb-3.5">
+      <div className="flex h-[min(100dvh,680px)] flex-col @min-[780px]:h-full @min-[780px]:max-h-full overflow-hidden">
+        <div className="flex shrink-0 flex-col gap-1 px-6 pt-[26px] pb-3.5">
           <h2 id="refine-heading" className="text-[15px] font-medium">
             Refine with AI
           </h2>
@@ -93,7 +112,12 @@ export function RefinePanel({
         </div>
 
         {/* column-reverse keeps the newest message in view. Focusable, so it scrolls from the keyboard too (E11-3). */}
-        <div role="log" aria-label="Conversation" tabIndex={0} className="flex min-h-0 flex-1 flex-col-reverse overflow-auto px-6">
+        <div
+          role="log"
+          aria-label="Conversation"
+          tabIndex={0}
+          className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto overflow-x-hidden scrollbar-subtle px-6 focus:outline-none overscroll-contain"
+        >
           <div className="flex flex-col gap-3.5 pt-1.5 pb-4">
             {messages.map((message) => (
               <div key={message.id} className={cn("flex flex-col gap-[5px]", message.role === "USER" ? "items-end" : "items-start")}>
@@ -105,7 +129,7 @@ export function RefinePanel({
           </div>
         </div>
 
-        <div className="flex flex-col gap-2.5 border-t border-line px-6 pt-3.5 pb-6">
+        <div className="flex shrink-0 flex-col gap-2.5 border-t border-line px-6 pt-3.5 pb-6 bg-paper">
           {!aiReady && tab !== "posting" && (
             <p className="text-meta text-muted">
               Refining needs an AI provider.{" "}

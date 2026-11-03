@@ -19,23 +19,26 @@ const extracted: Extracted = {
 };
 
 describe("refineLatexResume", () => {
-  it("refines LaTeX code and extracts reply from markers", async () => {
+  it("returns structured edits and reply", async () => {
     const mockProvider = new MockProvider({
-      reply: () => `
----LATEX_START---
-\\section{Summary}
-Shortened summary highlighting Rust.
-\\section{Experience}
-Rust Systems Engineer at Acme.
----LATEX_END---
-I shortened your summary and emphasized your Rust experience.
-`,
+      reply: () => ({
+        reply: "I updated your summary to highlight Rust.",
+        edits: [
+          {
+            blockId: "B2",
+            action: "replace",
+            find: "\\item Original bullet point.",
+            replace: "\\item Tailored bullet point emphasizing Rust.",
+            reason: "Align with Rust Dev requirement",
+          },
+        ],
+      }),
     });
 
     const initialLatex = `\\documentclass{article}
 \\begin{document}
 \\section{Summary}
-Original long summary.
+\\item Original bullet point.
 \\end{document}`;
 
     const result = await refineLatexResume(
@@ -46,31 +49,32 @@ Original long summary.
         match: null,
         facts: [],
         latexSource: initialLatex,
-        request: "Make summary shorter and highlight Rust",
+        request: "Highlight Rust experience",
       },
       { creativity: "BALANCED", strict: true, language: null },
     );
 
-    expect(result.data.latex).toContain("\\documentclass{article}");
-    expect(result.data.latex).toContain("Shortened summary highlighting Rust.");
-    expect(result.data.reply).toContain("I shortened your summary");
+    expect(result.data.reply).toBe("I updated your summary to highlight Rust.");
+    expect(result.data.edits).toHaveLength(1);
+    expect(result.data.edits[0].blockId).toBe("B2");
+    expect(result.data.edits[0].replace).toContain("emphasizing Rust");
   });
 
-  it("handles fallback when markers are absent", async () => {
+  it("passes targetSnippet into prompt when present", async () => {
     const mockProvider = new MockProvider({
-      reply: () => `
-\\section{Summary}
-Updated summary.
-`,
+      reply: () => ({
+        reply: "Updated selected line.",
+        edits: [],
+      }),
     });
 
     const initialLatex = `\\documentclass{article}
 \\begin{document}
-\\section{Summary}
-Old.
+\\section{Experience}
+\\item Selected line.
 \\end{document}`;
 
-    const result = await refineLatexResume(
+    await refineLatexResume(
       mockProvider,
       {
         profile: demoProfile(),
@@ -78,13 +82,15 @@ Old.
         match: null,
         facts: [],
         latexSource: initialLatex,
-        request: "Update summary",
+        request: "Improve this line",
+        targetSnippet: "\\item Selected line.",
       },
       { creativity: "BALANCED", strict: true, language: null },
     );
 
-    expect(result.data.latex).toContain("\\documentclass{article}");
-    expect(result.data.latex).toContain("Updated summary.");
-    expect(result.data.reply).toBeTruthy();
+    expect(mockProvider.calls).toHaveLength(1);
+    const content = mockProvider.calls[0].messages[0].content;
+    expect(content).toContain("Candidate's selected LaTeX snippet to focus on:");
+    expect(content).toContain("\\item Selected line.");
   });
 });

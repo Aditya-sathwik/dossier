@@ -1,4 +1,7 @@
+import { z } from "zod";
+
 import type { Extracted, Match } from "@/lib/application-data";
+import { tagLatexDocument, type RawEdit } from "@/lib/diff";
 import type { ProfileData } from "@/lib/profile";
 
 import {
@@ -6,20 +9,34 @@ import {
   CREATIVITY,
   jobForPrompt,
   languageRule,
+  LATEX_WRITING_RULES,
   profileForPrompt,
+  RESUME_ALIGNMENT_RULES,
+  RESUME_COMMENT_RULES,
   system,
   truthfulness,
   UNTRUSTED_POSTING,
   type Task,
 } from "./prompt-parts";
-import {
-  areBracesBalanced,
-  areEnvironmentsBalanced,
-  splitLatexDocument,
-  stripMarkdownCodeBlocks,
-} from "./tailor-latex-resume";
 
-export const REFINE_LATEX_VERSION = "refine-latex@1";
+export const REFINE_LATEX_VERSION = "refine-latex@2";
+
+export const rawEditSchema = z.object({
+  id: z.string().optional(),
+  blockId: z.string().describe("The ID of the block being targeted from the tagged document, e.g. 'B5' or 'B12'"),
+  action: z
+    .enum(["replace", "insertAfter", "insertBefore", "delete"])
+    .optional()
+    .default("replace"),
+  find: z.string().optional().describe("Optional verbatim lines if blockId not used"),
+  replace: z.string().default("").describe("New LaTeX lines to replace the block with or insert"),
+  reason: z.string().describe("Short explanation of why this change was made"),
+});
+
+export const refineLatexResultSchema = z.object({
+  reply: z.string().describe("Friendly 1-2 sentence response to the candidate summarizing what was changed"),
+  edits: z.array(rawEditSchema).describe("List of targeted edits to apply to the LaTeX document"),
+});
 
 export type RefineLatexInput = {
   profile: ProfileData;
@@ -29,110 +46,104 @@ export type RefineLatexInput = {
   latexSource: string;
   request: string;
   history?: { role: string; text: string }[];
+  targetSnippet?: string | null;
 };
 
 export type RefineLatexResult = {
-  latex: string;
   reply: string;
+  edits: RawEdit[];
 };
 
 const INSTRUCTIONS = `You are an expert resume writer and LaTeX engineer.
-A candidate is chatting with you to refine their LaTeX resume for a specific job application.
-The user will ask for a change (e.g. "make the summary shorter", "emphasize leadership in the second role", "mention Rust in skills").
+A candidate is refining their LaTeX resume for a specific job application.
+The candidate may ask for specific improvements or provide tailoring points derived from job requirements and candidate comments.
 
-RULES:
-1. Output your answer in two parts separated by the exact delimiter:
----LATEX_START---
-<the modified LaTeX code that goes between \\begin{document} and \\end{document}>
----LATEX_END---
-<a brief, friendly 1-2 sentence explanation to the candidate describing what you changed>
+Lines in the resume body are tagged with block IDs like [B1], [B2], [B3]...
 
-2. The LaTeX portion must contain ONLY the content between \\begin{document} and \\end{document}.
-3. Do NOT output \\documentclass, \\usepackage, custom command definitions, or \\begin{document}. The preamble is already preserved in code.
-4. Keep the exact same section structure, macro names, and formatting commands (e.g. \\resumeSubheading, \\resumeItem, \\section).
-5. Ensure all LaTeX syntax remains completely valid: escape special characters (e.g. \\%, \\&, \\$, \\#, \\_) and maintain strictly balanced braces and environments.
-6. Never invent companies, degrees, dates, or experiences not in the candidate profile.
-7. Address the user's specific request accurately while keeping the resume professional and tailored to the job.`;
+RULES FOR EDITS:
+1. Output JSON matching the schema with:
+   - "reply": A friendly 1-2 sentence explanation describing the changes you made.
+   - "edits": An array of targeted edits.
+2. For each edit in "edits":
+   - "blockId": The ID of the block (e.g. "B6") being targeted.
+   - "action":
+     * "replace": replace the specified block line with new LaTeX code.
+     * "insertAfter": insert a new bullet or line after the specified block.
+   - "replace": The updated LaTeX line(s).
+     * Maintain strictly valid LaTeX syntax.
+     * Escape special characters properly (\\%, \\&, \\$, \\#, \\_).
+     * Maintain balanced curly braces { and } and environment tags.
+     * If writing an item, include the leading '\\item '.
+   - "reason": A brief explanation of why this specific edit was made.
+3. TEXT-ONLY CONTENT EDITING:
+   - You ONLY modify the human-readable text of bullet points, summary sentences, and skill lists.
+   - NEVER alter, replace, or output document preamble commands (e.g. \\documentclass, \\usepackage, \\hypersetup, \\titleformat, \\definecolor).
+   - NEVER replace structural environment delimiters (e.g. \\begin{itemize}, \\end{itemize}, \\begin{tabularx}, \\resumeItemListStart, \\resumeItemListEnd).
+   - Keep bullet macro wrappers intact:
+     * If the block is \\item[--] ..., replace it with \\item[--] <new text>.
+     * If the block is \\resumeItem{...}, replace it with \\resumeItem{<new text>}.
+     * If the block is \\item ..., replace it with \\item <new text>.
+4. If the user provided a specific target snippet (selected lines), focus your edits on the corresponding block(s).
+5. Never invent companies, degrees, or dates not in the candidate's profile.
+6. If no changes are needed or you cannot fulfill the request, return an empty "edits" array and explain why in "reply".`;
 
 export const refineLatexResume: Task<RefineLatexInput, RefineLatexResult> = async (
   provider,
-  { profile, extracted, match, facts, latexSource, request, history = [] },
+  { profile, extracted, match, facts, latexSource, request, history = [], targetSnippet },
   options,
 ) => {
-  const { preamble, body, postscript } = splitLatexDocument(latexSource);
+  const { taggedText } = tagLatexDocument(latexSource);
+
+  // Extract the tagged body between \begin{document} and \end{document} to keep prompt focused
+  // while guaranteeing that the [B#] block IDs match the full document tagging 100%.
+  const beginMarker = "\\begin{document}";
+  const endMarker = "\\end{document}";
+  const beginIdx = taggedText.indexOf(beginMarker);
+  const endIdx = taggedText.lastIndexOf(endMarker);
+  const taggedBody =
+    beginIdx !== -1 && endIdx !== -1
+      ? taggedText.slice(beginIdx + beginMarker.length, endIdx).trim()
+      : taggedText;
 
   const formattedHistory = history
     .slice(-4)
     .map((turn) => `${turn.role === "user" ? "Candidate" : "Assistant"}: ${turn.text}`)
     .join("\n");
 
-  const responseText = await provider.complete({
+  const promptContent = [
+    `The candidate's profile:\n${profileForPrompt(profile)}`,
+    `The job:\n${jobForPrompt(extracted, match)}`,
+    formattedHistory ? `Recent conversation:\n${formattedHistory}` : "",
+    targetSnippet
+      ? `Candidate's selected LaTeX snippet to focus on:\n\`\`\`latex\n${targetSnippet.trim()}\n\`\`\``
+      : "",
+    `Current tagged LaTeX resume body:\n\`\`\`latex\n${taggedBody}\n\`\`\``,
+    `Candidate's request:\n${request}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const answer = await provider.complete({
     system: system(
       INSTRUCTIONS,
+      RESUME_ALIGNMENT_RULES,
+      LATEX_WRITING_RULES,
+      RESUME_COMMENT_RULES,
       truthfulness(options.strict),
       candidateFacts(profile, facts),
       CREATIVITY[options.creativity],
       languageRule(options.language),
       UNTRUSTED_POSTING,
     ),
-    messages: [
-      {
-        role: "user",
-        content: [
-          `The candidate's profile:\n${profileForPrompt(profile)}`,
-          `The job:\n${jobForPrompt(extracted, match)}`,
-          formattedHistory ? `Recent conversation:\n${formattedHistory}` : "",
-          `Current LaTeX resume body:\n${body.trim()}`,
-          `Candidate's request:\n${request}`,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-      },
-    ],
+    messages: [{ role: "user", content: promptContent }],
+    schema: refineLatexResultSchema,
+    schemaName: "refine_latex_resume",
     creativity: options.creativity,
     signal: options.signal,
   });
 
-  let raw = responseText.trim();
-  let modifiedBody = "";
-  let reply = "";
-
-  const startMarker = "---LATEX_START---";
-  const endMarker = "---LATEX_END---";
-
-  if (raw.includes(startMarker) && raw.includes(endMarker)) {
-    const afterStart = raw.slice(raw.indexOf(startMarker) + startMarker.length);
-    const endIdx = afterStart.indexOf(endMarker);
-    modifiedBody = afterStart.slice(0, endIdx).trim();
-    reply = afterStart.slice(endIdx + endMarker.length).trim();
-  } else {
-    modifiedBody = stripMarkdownCodeBlocks(raw);
-    reply = "I've updated your LaTeX resume according to your request.";
-  }
-
-  if (modifiedBody.includes("\\begin{document}")) {
-    const inner = splitLatexDocument(modifiedBody);
-    modifiedBody = inner.body.trim();
-  }
-
-  modifiedBody = stripMarkdownCodeBlocks(modifiedBody);
-
-  // Validate structural integrity
-  if (!areBracesBalanced(modifiedBody)) {
-    throw new Error("Refined LaTeX has unbalanced curly braces.");
-  }
-  if (!areEnvironmentsBalanced(modifiedBody)) {
-    throw new Error("Refined LaTeX has unbalanced environments (e.g. unclosed itemize).");
-  }
-
-  const fullDocument = `${preamble}\n${modifiedBody}\n${postscript || "\\end{document}"}`;
-
   return {
-    data: {
-      latex: fullDocument,
-      reply: reply || "I've updated your LaTeX resume according to your request.",
-    },
+    data: answer,
     promptVersion: REFINE_LATEX_VERSION,
   };
 };
-

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
@@ -13,6 +14,8 @@ export type LatexEditorProps = {
   diagnostics?: string[];
   className?: string;
   "aria-label"?: string;
+  readOnly?: boolean;
+  onAskAiAboutSelection?: (selection: { text: string; startLine: number; endLine: number }) => void;
 };
 
 export function LatexEditor({
@@ -23,10 +26,30 @@ export function LatexEditor({
   diagnostics = [],
   className,
   "aria-label": ariaLabel = "LaTeX source code editor",
+  readOnly = false,
+  onAskAiAboutSelection,
 }: LatexEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const [showErrors, setShowErrors] = useState(true);
+  const [selectedInfo, setSelectedInfo] = useState<{ text: string; startLine: number; endLine: number } | null>(null);
+
+  const handleSelect = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (start !== end) {
+      const selected = value.substring(start, end);
+      if (selected.trim().length > 0) {
+        const startLine = value.substring(0, start).split("\n").length;
+        const endLine = value.substring(0, end).split("\n").length;
+        setSelectedInfo({ text: selected, startLine, endLine });
+        return;
+      }
+    }
+    setSelectedInfo(null);
+  };
 
   // Synchronize gutter scrolling with textarea scrolling
   const handleScroll = () => {
@@ -105,14 +128,46 @@ export function LatexEditor({
           onChange={handleChange}
           onScroll={handleScroll}
           onKeyDown={handleKeyDown}
+          onSelect={handleSelect}
+          onKeyUp={handleSelect}
+          onMouseUp={handleSelect}
           aria-label={ariaLabel}
+          readOnly={readOnly}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
           wrap="off"
           placeholder="Type or paste your LaTeX code here..."
-          className="flex-1 min-h-0 w-full h-full resize-none bg-transparent py-2.5 px-3 text-ink outline-none selection:bg-hover placeholder:text-muted/40 overflow-auto whitespace-pre tab-[2] scrollbar-subtle"
+          className={cn(
+            "flex-1 min-h-0 w-full h-full resize-none bg-transparent py-2.5 px-3 text-ink outline-none selection:bg-hover placeholder:text-muted/40 overflow-auto whitespace-pre tab-[2] scrollbar-subtle",
+            readOnly && "cursor-default opacity-85 select-text",
+          )}
         />
+
+        {/* Floating Ask AI Button on Selection */}
+        {selectedInfo && onAskAiAboutSelection && !readOnly && (
+          <div className="absolute bottom-3 right-4 z-10 flex items-center shadow-lg animate-in fade-in zoom-in-95 duration-150">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                onAskAiAboutSelection(selectedInfo);
+                setSelectedInfo(null);
+              }}
+              className="flex items-center gap-1.5 text-xs font-semibold shadow-md bg-primary text-white hover:bg-primary/90"
+              title="Ask AI to refine this selected section"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+              <span>
+                Ask AI about selection{" "}
+                {selectedInfo.startLine === selectedInfo.endLine
+                  ? `(L${selectedInfo.startLine})`
+                  : `(L${selectedInfo.startLine}–L${selectedInfo.endLine})`}
+              </span>
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Compiler Diagnostic Error Drawer */}

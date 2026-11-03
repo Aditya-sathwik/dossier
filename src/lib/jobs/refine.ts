@@ -12,7 +12,7 @@ import { readJson } from "@/lib/application-documents";
 import { updateDocuments } from "@/lib/document-units";
 import { withoutPrivateParts } from "@/lib/letter-frame";
 import { latexSourceOf } from "@/lib/latex/base";
-import { compileLatex } from "@/lib/latex/compile";
+import { codeHunkSchema, editsToHunks, validateEdits } from "@/lib/diff";
 import { prisma } from "@/lib/prisma";
 import { loadFactTexts, loadProfile } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
@@ -45,6 +45,8 @@ export const refineJob = defineJob({
     target: unitRef.nullable(),
     /** The document on screen. */
     viewing: z.enum(DocumentKind).nullable(),
+    /** Selected text in LaTeX editor, if any. */
+    targetSnippet: z.string().nullable().optional(),
   }),
   result: z.object({
     /** The AI's reply. */
@@ -53,8 +55,10 @@ export const refineJob = defineJob({
     edited: z.array(unitRef),
     latex: z.string().optional(),
     previousLatex: z.string().optional(),
+    hunks: z.array(codeHunkSchema).optional(),
+    baseLatex: z.string().optional(),
   }),
-  async run({ applicationId, messageId, request, target, viewing }, { step, signal }) {
+  async run({ applicationId, messageId, request, target, viewing, targetSnippet }, { step, signal }) {
     await step("Thinking");
     const application = await prisma.application.findUniqueOrThrow({
       where: { id: applicationId },
@@ -93,28 +97,30 @@ export const refineJob = defineJob({
           latexSource: previousLatex,
           request,
           history,
+          targetSnippet: targetSnippet ?? undefined,
         },
         { ...options, language: application.language || options.language, signal },
       );
 
-      // Verify compilation with Tectonic
-      await step("Compiling LaTeX preview");
-      const compiled = await compileLatex(data.latex, { signal });
-      if (!compiled.ok) {
-        throw new Error(`Refined LaTeX failed to compile: ${compiled.error}`);
-      }
-
-      // Save updated LaTeX code to Application
-      await prisma.application.update({
-        where: { id: applicationId },
-        data: { latexCode: data.latex },
+      // Validate edits against current base document
+      const { validEdits } = validateEdits(previousLatex, data.edits, {
+        selectionSnippet: targetSnippet ?? undefined,
       });
+
+      const hunks = editsToHunks(previousLatex, validEdits);
+
+      let replyText = data.reply;
+      if (data.edits.length > 0 && validEdits.length === 0) {
+        replyText =
+          data.reply ||
+          "I suggested changes, but could not locate the exact lines in your current LaTeX code. Please try selecting the lines directly in the editor.";
+      }
 
       const reply = await prisma.chatMessage.create({
         data: {
           applicationId,
           role: ChatRole.AI,
-          text: data.reply,
+          text: replyText,
           writtenWith: promptVersion,
         },
         select: { id: true },
@@ -122,9 +128,9 @@ export const refineJob = defineJob({
 
       return {
         messageId: reply.id,
-        edited: [{ document: DocumentKind.RESUME, unitId: "latex" }],
-        latex: data.latex,
-        previousLatex,
+        edited: validEdits.length > 0 ? [{ document: DocumentKind.RESUME, unitId: "latex" }] : [],
+        hunks,
+        baseLatex: previousLatex,
       };
     }
 

@@ -124,6 +124,32 @@ export const COMMENT_RULES_BASE = `Items with "candidateComment" and the "${FACT
 
 export const RESUME_COMMENT_RULES = `${COMMENT_RULES_BASE} In the resume, weave in candidate comments only where they describe concrete work, skills, or projects. Do not invent experience for gaps.`;
 
+/**
+ * ATS alignment rules distilled from Job Hunt Copilot & modern ATS engines:
+ * - Outcome/Impact bullet structure
+ * - Real metrics preservation
+ * - Keyword mirroring
+ * - Skills ordering
+ */
+export const RESUME_ALIGNMENT_RULES = `ATS & IMPACT RESUME ALIGNMENT RULES:
+1. Bullet Architecture: Structure experience bullets as: Action verb + what was built/led + key technology/skills -> outcome -> measurable impact (e.g. latency, throughput, scale, uptime, cost/revenue, user growth, MTTR).
+2. Bullet Reordering: Place the achievements and bullets most relevant to the target role at the top of each experience entry.
+3. Keyword Matching: Mirror the exact spelling and casing used in the job description for tools, frameworks, and domain terms (e.g. "Node.js" vs "NodeJS", "CI/CD", "PostgreSQL", "Docker", "Kubernetes").
+4. Metric Integrity: Keep real metrics from the profile; never invent fake numbers or remove existing verified impact.
+5. Skills Prioritization: Order the skills section so the job's must-have requirements appear first.`;
+
+/**
+ * LaTeX writing best practices distilled from latex-writing skill:
+ * - Escaping and syntax preservation
+ * - Proper typography (en-dashes for date ranges, no raw quotes)
+ * - Macro structure preservation
+ */
+export const LATEX_WRITING_RULES = `LATEX WRITING BEST PRACTICES:
+1. Escaping: Strictly escape LaTeX special characters: \\%, \\&, \\$, \\#, \\_, \\~{}. Never leave unescaped '%' or '&'.
+2. Syntax & Environments: Ensure all curly braces { and } and environment tags (\\begin{itemize} ... \\end{itemize}) remain strictly balanced and matched.
+3. Typography: Use en-dashes for date ranges (e.g. "2022 -- Present" or "Jan 2023 -- Sep 2024"). Do not use raw ASCII double quotes "".
+4. Macro Integrity: Keep existing macro signatures (e.g. \\resumeSubheading, \\resumeItem, \\section). Do not invent custom macros not defined in the template.`;
+
 export const COVER_LETTER_COMMENT_RULES = `${COMMENT_RULES_BASE} In the cover letter, if a requirement is marked as a gap or partial match but has a candidateComment, address it honestly using that comment.`;
 
 export const EMAIL_COMMENT_RULES = `${COMMENT_RULES_BASE} In the email, weave in candidate comments that are directly relevant to reaching out.`;

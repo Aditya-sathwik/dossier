@@ -9,7 +9,7 @@ import { plainUnit, type UnitRenderer } from "@/components/documents/document-pa
 import { DocumentPreview } from "@/components/documents/document-preview";
 import { DownloadPdfButton } from "@/components/documents/download-pdf-button";
 import { TailoredLetter, TailoredResume } from "@/components/documents/tailored-documents";
-import { LatexWorkspace } from "@/components/latex/latex-workspace";
+import { LatexWorkspace, type PendingProposal } from "@/components/latex/latex-workspace";
 import { toast, toastResult } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -31,6 +31,7 @@ import { documentLabels } from "@/lib/document-labels";
 import { defaultFrame, isFrameUnit, isParagraph, withFrame, WRITTEN_FRAME_UNITS } from "@/lib/letter-frame";
 import type { ActivityEntry } from "@/lib/activity";
 import type { DocumentData } from "@/lib/application-documents";
+import type { CodeHunk } from "@/lib/diff";
 import { retry } from "@/lib/jobs/actions";
 import type { RefineResult } from "@/lib/jobs/refine";
 import type { RegenerateUnitResult } from "@/lib/jobs/regenerate-unit";
@@ -174,6 +175,10 @@ export type ApplicationViewProps = {
   /** A reply still being written, e.g. since before a reload. */
   refining: string | null;
   suggestions: RefineSuggestions;
+  /** Whether to auto-open AI Refine for LaTeX tailoring upon creation redirect (?tailor=1). */
+  autoOpenTailor?: boolean;
+  /** Tailoring instructions prefilled from candidate comments and job match. */
+  tailoringPrefill?: string;
 };
 
 /**
@@ -211,6 +216,8 @@ export function ApplicationView({
   messages,
   refining,
   suggestions,
+  autoOpenTailor = false,
+  tailoringPrefill = "",
 }: ApplicationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState(initialTab);
@@ -242,6 +249,8 @@ export function ApplicationView({
   // Replies being undone, shown as undone until the page has it.
   const [undoing, showUndoing] = useOptimistic<readonly string[], string>([], (current, id) => [...current, id]);
   const [chatFocus, focusChat] = useState(0);
+  const [chatDraft, setChatDraft] = useState(tailoringPrefill);
+  const hasHandledAutoTailor = useRef(false);
   const [rewrites, setRewrites] = useState<Readonly<Record<string, Rewrite>>>(() =>
     Object.fromEntries(rewritingAtLoad.map(({ jobId, document, unitId }) => [keyOf(document, unitId), { jobId, revision: 0 }])),
   );
@@ -251,11 +260,44 @@ export function ApplicationView({
   const [latexCode, setLatexCode] = useState<string>(application.latexCode ?? "");
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [latexJob, setLatexJob] = useState<Rewrite | null>(tailoringLatex ? { jobId: tailoringLatex, revision: 0 } : null);
-  const [showRefine, setShowRefine] = useState(false);
+  const [showRefine, setShowRefine] = useState(autoOpenTailor);
+  const [pendingProposal, setPendingProposal] = useState<PendingProposal | null>(null);
 
-  const { status: latexSaveStatus } = useAutosave(latexCode, (code) =>
-    saveApplicationLatex({ id: application.id, latex: code }),
-  );
+  // Auto-open AI Refine panel if redirected from creation with ?tailor=1
+  useEffect(() => {
+    if (autoOpenTailor && !hasHandledAutoTailor.current) {
+      hasHandledAutoTailor.current = true;
+      setShowRefine(true);
+      if (tailoringPrefill) {
+        setChatDraft(tailoringPrefill);
+      }
+      focusChat((count) => count + 1);
+
+      // Clean ?tailor=1 from URL so reload does not re-trigger
+      try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("tailor")) {
+          url.searchParams.delete("tailor");
+          window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+        }
+      } catch {
+        // window.location might not be a full URL in some test environments
+      }
+    }
+  }, [autoOpenTailor, tailoringPrefill]);
+
+  const askAiAboutLatexSelection = (sel: { text: string; startLine: number; endLine: number }) => {
+    setShowRefine(true);
+    const lineLabel = sel.startLine === sel.endLine ? `line ${sel.startLine}` : `lines ${sel.startLine}–${sel.endLine}`;
+    const snippetPrompt = `Regarding ${lineLabel}:\n\`\`\`latex\n${sel.text.trim()}\n\`\`\`\nPlease `;
+    setChatDraft(snippetPrompt);
+    focusChat((count) => count + 1);
+  };
+
+  const { status: latexSaveStatus } = useAutosave(latexCode, (code) => {
+    if (pendingProposal) return Promise.resolve({ ok: true as const, data: undefined });
+    return saveApplicationLatex({ id: application.id, latex: code });
+  });
 
   const changeResumeFormat = async (format: ResumeFormat) => {
     const prev = resumeFormat;
@@ -473,9 +515,24 @@ export function ApplicationView({
     if (job.status !== "DONE" || !job.result) return;
     setReply(null);
     startTransition(() => router.refresh());
-    if ("latex" in job.result && job.result.latex) {
-      setLatexCode(job.result.latex);
-      const prev = job.result.previousLatex;
+    const res = job.result as {
+      latex?: string;
+      previousLatex?: string;
+      hunks?: CodeHunk[];
+      baseLatex?: string;
+      edited: Array<{ document: DocumentKind; unitId: string }>;
+    };
+
+    if (res.hunks && res.hunks.length > 0 && res.baseLatex) {
+      setPendingProposal({ hunks: res.hunks, baseLatex: res.baseLatex });
+      selectTab("resume");
+      toast(`AI suggested ${res.hunks.length} changes for your LaTeX resume.`);
+      return;
+    }
+
+    if (res.latex) {
+      setLatexCode(res.latex);
+      const prev = res.previousLatex;
       toast("Refined your LaTeX resume.", {
         action: prev
           ? {
@@ -773,6 +830,16 @@ export function ApplicationView({
                 onChange={setLatexCode}
                 downloadHref={`/api/pdf?doc=resume&application=${application.id}`}
                 saved={latexSaveStatus === "saved" || latexSaveStatus === "idle"}
+                pendingProposal={pendingProposal}
+                onApplyProposal={(newCode) => {
+                  setPendingProposal(null);
+                  setLatexCode(newCode);
+                  void saveApplicationLatex({ id: application.id, latex: newCode });
+                }}
+                onDiscardProposal={() => {
+                  setPendingProposal(null);
+                }}
+                onAskAiAboutSelection={askAiAboutLatexSelection}
                 actions={
                   <div className="flex items-center gap-2">
                     <SegmentedControl<ResumeFormat>
@@ -967,6 +1034,8 @@ export function ApplicationView({
             onSend={send}
             aiReady={aiReady}
             focusRequest={chatFocus}
+            draft={chatDraft}
+            onDraftChange={setChatDraft}
           >
             {(message) =>
               message.canUndo &&

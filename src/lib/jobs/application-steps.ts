@@ -14,9 +14,16 @@ export function writeDocumentsSteps({
   hasComments: boolean;
   latex: boolean;
 }): readonly string[] {
+  if (latex) {
+    return [
+      ...(hasComments ? ["Reading your comments and instructions"] : []),
+      "Writing your cover letter",
+      "Saving the application",
+    ];
+  }
   return [
     ...(hasComments ? ["Reading your comments and instructions"] : []),
-    ...(latex ? ["Tailoring your LaTeX resume", "Compiling LaTeX preview"] : ["Tailoring your resume"]),
+    "Tailoring your resume",
     "Writing your cover letter",
     "Saving the application",
   ];

@@ -7,7 +7,9 @@ import {
   CREATIVITY,
   jobForPrompt,
   languageRule,
+  LATEX_WRITING_RULES,
   profileForPrompt,
+  RESUME_ALIGNMENT_RULES,
   RESUME_COMMENT_RULES,
   system,
   truthfulness,
@@ -130,6 +132,8 @@ export const tailorLatexResume: Task<TailorLatexInput, string> = async (
   const responseText = await provider.complete({
     system: system(
       INSTRUCTIONS,
+      RESUME_ALIGNMENT_RULES,
+      LATEX_WRITING_RULES,
       truthfulness(options.strict),
       candidateFacts(profile, facts),
       RESUME_COMMENT_RULES,

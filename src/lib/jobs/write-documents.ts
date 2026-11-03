@@ -6,9 +6,7 @@ import { Tone } from "@/generated/prisma/enums";
 import { getAiProvider } from "@/lib/ai";
 import { loadTaskOptions } from "@/lib/ai/task-options";
 import { tailorResume, writeCoverLetter } from "@/lib/ai/tasks";
-import { tailorLatexResume } from "@/lib/ai/tasks/tailor-latex-resume";
-import { extractedSchema, matchSchema, unitsSchema } from "@/lib/application-data";
-import { compileLatex } from "@/lib/latex/compile";
+import { extractedSchema, matchSchema, unitsSchema, type Unit } from "@/lib/application-data";
 import { loadProfile } from "@/lib/profile-data";
 import { loadSettings } from "@/lib/settings-data";
 
@@ -16,9 +14,10 @@ import { writeDocumentsSteps } from "./application-steps";
 import { defineJob } from "./runner";
 
 /**
- * Writes the tailored resume and cover letter (E7-6, NEW-7). Saves nothing:
- * the application is created from the result in one transaction afterwards,
- * so leaving midway leaves nothing behind.
+ * Writes the cover letter and resume units (E7-6, NEW-7).
+ * When format is LaTeX, skips the heavy resume tailoring LLM call and stores
+ * minimal baseline resume units, leaving LaTeX tailoring to the interactive
+ * workspace on the next page.
  */
 export const writeDocumentsJob = defineJob({
   type: "write-documents",
@@ -52,7 +51,7 @@ export const writeDocumentsJob = defineJob({
     ]);
 
     const hasComments = match.items.some((i) => i.comment) || !!note.trim();
-    const isLatex = settings.resumeFormat === "latex" && !!settings.baseResumeLatex;
+    const isLatex = settings.resumeFormat === "latex";
     const steps = writeDocumentsSteps({ hasComments, latex: isLatex });
     let stepIndex = 0;
 
@@ -63,60 +62,46 @@ export const writeDocumentsJob = defineJob({
       await step(steps[stepIndex++]);
     }
 
-    let tailoredLatex: string | undefined;
-    let latexStatus: "none" | "tailored" | "fallback" = "none";
-    let latexError: string | undefined;
-    const baseLatex = isLatex ? settings.baseResumeLatex : undefined;
+    let resumeUnits: Unit[];
+    let resumeWith: string;
 
-    if (isLatex && settings.baseResumeLatex) {
-      await step(steps[stepIndex++]);
-      try {
-        const latexResult = await tailorLatexResume(
-          provider,
-          {
-            profile,
-            extracted,
-            match,
-            facts,
-            latexSource: settings.baseResumeLatex,
-          },
-          { ...options, signal },
-        );
-
-        await step(steps[stepIndex++]);
-        const compiled = await compileLatex(latexResult.data, { signal });
-        if (compiled.ok) {
-          tailoredLatex = latexResult.data;
-          latexStatus = "tailored";
-        } else {
-          latexStatus = "fallback";
-          latexError = compiled.error;
-          tailoredLatex = settings.baseResumeLatex;
-        }
-      } catch (err) {
-        latexStatus = "fallback";
-        latexError = err instanceof Error ? err.message : "LaTeX tailoring failed";
-        tailoredLatex = settings.baseResumeLatex;
-      }
+    if (isLatex) {
+      // In LaTeX mode, the primary document is LaTeX code.
+      // Store minimal summary units to satisfy database schema and unitsSchema without calling tailorResume.
+      resumeUnits = [
+        {
+          id: "summary",
+          label: "Summary",
+          text: profile.basics.headline || "LaTeX Resume",
+        },
+      ];
+      resumeWith = "latex-base";
     } else {
       await step(steps[stepIndex++]);
+      const tailored = await tailorResume(
+        provider,
+        { profile, extracted, match, facts, posting },
+        { ...options, signal },
+      );
+      resumeUnits = tailored.data;
+      resumeWith = tailored.promptVersion;
     }
 
-    // Always generate standard units for application database/export compatibility
-    const resume = await tailorResume(provider, { profile, extracted, match, facts, posting }, { ...options, signal });
-
     await step(steps[stepIndex++]);
-    const letter = await writeCoverLetter(provider, { profile, extracted, match, tone, facts, posting }, { ...options, signal });
+    const letter = await writeCoverLetter(
+      provider,
+      { profile, extracted, match, tone, facts, posting },
+      { ...options, signal },
+    );
 
     return {
-      resume: resume.data,
-      resumeWith: resume.promptVersion,
+      resume: resumeUnits,
+      resumeWith,
       letter: letter.data,
       letterWith: letter.promptVersion,
-      latex: tailoredLatex,
-      latexStatus,
-      latexError,
-      baseLatex,
+      latex: settings.baseResumeLatex || undefined,
+      latexStatus: "none" as const,
+      baseLatex: settings.baseResumeLatex || undefined,
     };
   },
 });

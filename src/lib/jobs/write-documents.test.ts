@@ -24,25 +24,6 @@ vi.mock("@/lib/profile-data", async () => {
 vi.mock("@/lib/settings-data", () => ({
   loadSettings: async () => mockSettings.current,
 }));
-vi.mock("@/lib/latex/compile", () => ({
-  compileLatex: vi.fn(async (latex: string) => {
-    if (latex.includes("FAIL_COMPILE")) {
-      return { ok: false, error: "Syntax error on line 1", diagnostics: ["! Syntax error"] };
-    }
-    return { ok: true, pdf: Buffer.from("pdf-data") };
-  }),
-}));
-vi.mock("@/lib/ai/tasks/tailor-latex-resume", () => ({
-  tailorLatexResume: vi.fn(async (_p, input) => {
-    if (input.latexSource.includes("FAIL_TAILOR")) {
-      throw new Error("AI tailoring crashed");
-    }
-    return {
-      data: `${input.latexSource}\n% Tailored for ${input.extracted.company}`,
-      promptVersion: "tailor-latex-resume@1",
-    };
-  }),
-}));
 vi.mock("./runner", () => ({ defineJob: <T,>(definition: T) => definition }));
 
 describe("writeDocumentsJob (E7-6)", () => {
@@ -59,7 +40,7 @@ describe("writeDocumentsJob (E7-6)", () => {
     language: "English",
   };
 
-  it("tailors the resume, then writes the letter, naming each step when no comments exist", async () => {
+  it("tailors the resume, then writes the letter in standard mode", async () => {
     mockSettings.current = { resumeFormat: "standard", baseResumeLatex: "" };
     provider.current = new MockProvider({
       reply: (call) =>
@@ -80,12 +61,9 @@ describe("writeDocumentsJob (E7-6)", () => {
     );
 
     const expectedSteps = writeDocumentsSteps({ hasComments: false, latex: false });
-    // It reports all steps except the saving step which is handled post-job
     expect(steps).toEqual(expectedSteps.slice(0, 2));
     expect(result.resumeWith).toBe("tailor-resume@6");
     expect(result.letterWith).toBe("write-cover-letter@5");
-    expect(result.latexStatus).toBe("none");
-    expect(result.latex).toBeUndefined();
     expect(result.resume[0]).toMatchObject({ id: "summary", unverified: ["Google"] });
     expect(result.letter.map((unit) => unit.id)).toEqual(["recipient", "greeting", "paragraph:1", "sign-off"]);
   });
@@ -122,21 +100,19 @@ describe("writeDocumentsJob (E7-6)", () => {
     expect(steps[0]).toBe("Reading your comments and instructions");
   });
 
-  it("tailors and compiles LaTeX when resumeFormat is latex and baseResumeLatex exists", async () => {
+  it("skips tailorResume and provides minimal units when resumeFormat is latex", async () => {
     mockSettings.current = {
       resumeFormat: "latex",
-      baseResumeLatex: "\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}",
+      baseResumeLatex: "\\documentclass{article}\n\\begin{document}\nBase resume\n\\end{document}",
     };
+    // Provider only called for writeCoverLetter!
     provider.current = new MockProvider({
-      reply: (call) =>
-        call.json?.name === "tailored_resume"
-          ? { summary: "Designer.", roles: [], projects: [], skills: [], education: [] }
-          : {
-              recipient: "Ledgerly",
-              greeting: "Hi,",
-              paragraphs: [{ label: "Opening", text: "Hi." }],
-              signOff: "Best,",
-            },
+      reply: () => ({
+        recipient: "Ledgerly",
+        greeting: "Hi,",
+        paragraphs: [{ label: "Opening", text: "Hi." }],
+        signOff: "Best,",
+      }),
     });
 
     const steps: string[] = [];
@@ -153,44 +129,12 @@ describe("writeDocumentsJob (E7-6)", () => {
     );
 
     const expectedSteps = writeDocumentsSteps({ hasComments: true, latex: true });
-    expect(steps).toEqual(expectedSteps.slice(0, 4));
-    expect(result.latexStatus).toBe("tailored");
-    expect(result.latex).toContain("% Tailored for Ledgerly");
-    expect(result.baseLatex).toBe(mockSettings.current.baseResumeLatex);
-  });
-
-  it("falls back gracefully to base resume when LaTeX compilation fails", async () => {
-    mockSettings.current = {
-      resumeFormat: "latex",
-      baseResumeLatex: "\\documentclass{article}\nFAIL_COMPILE\n\\end{document}",
-    };
-    provider.current = new MockProvider({
-      reply: (call) =>
-        call.json?.name === "tailored_resume"
-          ? { summary: "Designer.", roles: [], projects: [], skills: [], education: [] }
-          : {
-              recipient: "Ledgerly",
-              greeting: "Hi,",
-              paragraphs: [{ label: "Opening", text: "Hi." }],
-              signOff: "Best,",
-            },
-    });
-
-    const steps: string[] = [];
-    const result = await writeDocumentsJob.run(
-      {
-        readJobId: "read-job",
-        posting: "Ledgerly is hiring.",
-        extracted,
-        match: { items: [] },
-        tone: "WARM",
-        note: "",
-      },
-      { id: "test-job", step: async (name) => void steps.push(name), signal: new AbortController().signal },
-    );
-
-    expect(result.latexStatus).toBe("fallback");
-    expect(result.latexError).toBe("Syntax error on line 1");
+    // In latex mode, steps are: Reading comments -> Writing cover letter (Saving is after)
+    expect(steps).toEqual(expectedSteps.slice(0, 2));
+    expect(result.resumeWith).toBe("latex-base");
+    expect(result.resume).toHaveLength(1);
+    expect(result.resume[0].id).toBe("summary");
     expect(result.latex).toBe(mockSettings.current.baseResumeLatex);
+    expect(result.letterWith).toBe("write-cover-letter@5");
   });
 });

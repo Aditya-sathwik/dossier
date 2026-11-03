@@ -343,7 +343,7 @@ export function NewApplication({
     }
     toast("Your application is ready. Nothing gets sent until you say so.");
     draftStore?.clear();
-    router.push(`/applications/${result.data}`);
+    router.push(`/applications/${result.data}?tailor=1`);
   };
 
   const isLatex = resumeFormat === "latex" && !!baseResumeLatex;
@@ -354,11 +354,8 @@ export function NewApplication({
   );
 
   const writeJob = useJob<WriteDocumentsResult>(draft.writeJobId, writeRevision, (job) => {
-    // If not LaTeX or no diff to inspect, save immediately as before
     if (job.status === "DONE" && job.id === draft.writeJobId) {
-      if (!isLatex) {
-        void save(job.id);
-      }
+      void save(job.id);
     }
   });
 
@@ -554,33 +551,17 @@ export function NewApplication({
           )}
 
           {draft.step === "creating" && (
-            <div className="flex flex-col gap-6">
-              <JobProgress
-                title="Putting your application together…"
-                steps={creatingSteps}
-                // "Saving the application" is the last step, once the documents are written.
-                current={writeJob?.status === "DONE" ? creatingSteps.length - 1 : jobStep(creatingSteps, writeJob)}
-                error={writeJob?.status === "FAILED" ? writeJob.error : saveError}
-                onRetry={() => void retryCreating()}
-                onBack={() => update({ step: "review" })}
-                backLabel="← Back to the details"
-              />
-              <AgentProgressConsole
-                title="Application Tailoring Console"
-                agentName="Tailor Agent"
-                steps={consoleSteps}
-                comments={commentsForConsole}
-                originalCode={writeJob?.result?.baseLatex ?? (isLatex ? baseResumeLatex : null)}
-                updatedCode={writeJob?.result?.latex ?? null}
-                latexStatus={writeJob?.result?.latexStatus ?? "none"}
-                latexError={writeJob?.result?.latexError ?? null}
-                isDone={writeJob?.status === "DONE"}
-                onCompleteAction={() => {
-                  if (draft.writeJobId) void save(draft.writeJobId);
-                }}
-                completeActionLabel="View application →"
-              />
-            </div>
+            <JobProgress
+              title="Putting your application together…"
+              steps={creatingSteps}
+              // "Saving the application" is the last step, once the documents are written.
+              current={writeJob?.status === "DONE" ? creatingSteps.length - 1 : jobStep(creatingSteps, writeJob)}
+              error={writeJob?.status === "FAILED" ? writeJob.error : saveError}
+              onRetry={() => void retryCreating()}
+              onBack={() => update({ step: "review" })}
+              backLabel="← Back to the details"
+              isLocalProvider={true}
+            />
           )}
         </div>
       </div>

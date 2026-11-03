@@ -16,6 +16,7 @@ import {
   languageRule,
   NO_EM_DASHES,
   profileForPrompt,
+  RESUME_ALIGNMENT_RULES,
   RESUME_COMMENT_RULES,
   system,
   truthfulness,
@@ -69,6 +70,7 @@ export const tailorResume: Task<TailorInput, Unit[]> = async (provider, { profil
   const answer = await provider.complete({
     system: system(
       INSTRUCTIONS,
+      RESUME_ALIGNMENT_RULES,
       pageFit(options.maxPages),
       truthfulness(options.strict),
       candidateFacts(profile, facts),

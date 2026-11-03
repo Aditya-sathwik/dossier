@@ -1169,5 +1169,70 @@ describe("the Email tab", () => {
 
       expect(resetApplicationLatex).toHaveBeenCalledWith({ id: "app-1" });
     });
+
+    it("auto-opens RefinePanel with prefilled prompt when autoOpenTailor is true", () => {
+      const prefill = "Please tailor my LaTeX resume for this role based on my notes:\n- For TypeScript: 5 years experience";
+      render(
+        <ApplicationView
+          {...props}
+          initialTab="resume"
+          application={{
+            ...props.application,
+            resumeFormat: "latex",
+            latexCode: "\\begin{document}Base\\end{document}",
+          }}
+          autoOpenTailor={true}
+          tailoringPrefill={prefill}
+        />,
+      );
+
+      // AI chat panel should be open
+      expect(screen.getByRole("heading", { name: /refine with ai/i })).toBeInTheDocument();
+      // Textarea draft should be prefilled
+      const textarea = screen.getByRole("textbox", { name: "Ask for a change" });
+      expect(textarea).toHaveValue(prefill);
+    });
+
+    it("enters review mode when AI refine returns hunks", async () => {
+      render(
+        <ApplicationView
+          {...props}
+          initialTab="resume"
+          application={{
+            ...props.application,
+            resumeFormat: "latex",
+            latexCode: "\\documentclass{article}\n\\begin{document}\nOld text\n\\end{document}",
+          }}
+          refining="reply-1"
+        />,
+      );
+
+      // Simulate refine job completing with hunks
+      report({
+        id: "reply-1",
+        status: "DONE",
+        result: {
+          baseLatex: "\\documentclass{article}\n\\begin{document}\nOld text\n\\end{document}",
+          hunks: [
+            {
+              id: "hunk-1",
+              oldStartOffset: 38,
+              oldEndOffset: 46,
+              oldStartLine: 3,
+              oldEndLine: 3,
+              oldText: "Old text",
+              newText: "Tailored text",
+              reason: "Tailor text for role",
+            },
+          ],
+          edited: [],
+        },
+      });
+
+      // Review banner should be visible
+      expect(await screen.findByText(/reviewing ai suggestions/i)).toBeInTheDocument();
+      expect(screen.getByText("Tailor text for role")).toBeInTheDocument();
+      expect(screen.getByText("Accept all")).toBeInTheDocument();
+    });
   });
 });

@@ -334,7 +334,7 @@ describe("creating the application (E7-6)", () => {
     emit({ id: "job-2", type: "write-documents", step: "Writing your cover letter" });
     expect(screen.getByText("Writing your cover letter").closest("li")).toHaveAttribute("aria-current", "step");
     emit({ id: "job-2", type: "write-documents", status: "DONE", step: "Writing your cover letter" });
-    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith("/applications/app-1"));
+    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith("/applications/app-1?tailor=1"));
     expect(createApplication).toHaveBeenCalledWith(expect.objectContaining({ writeJobId: "job-2", postingUrl: "" }));
     expect(toast).toHaveBeenCalledWith("Your application is ready. Nothing gets sent until you say so.");
   });
@@ -346,7 +346,7 @@ describe("creating the application (E7-6)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong on the server.");
     expect(screen.getByText("Saving the application").closest("li")).toHaveAttribute("aria-current", "step");
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith("/applications/app-1"));
+    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith("/applications/app-1?tailor=1"));
   });
 
   it("links the application to the Find jobs posting it started from (E14-8)", async () => {
@@ -574,7 +574,7 @@ describe("keeping the draft (E7-7)", () => {
     expect(screen.getByText("Preserved comment")).toBeInTheDocument();
   });
 
-  it("shows AgentProgressConsole during creation with diff and View application button", async () => {
+  it("shows progress bar and redirects with ?tailor=1 during creation", async () => {
     vi.mocked(createApplication).mockResolvedValue({ ok: true, data: "app-1" });
     vi.mocked(startWritingDocuments).mockResolvedValue({ ok: true, data: "job-write-1" });
     const user = userEvent.setup();
@@ -621,45 +621,28 @@ describe("keeping the draft (E7-7)", () => {
 
     await user.click(screen.getByRole("button", { name: "Create application →" }));
 
-    // Console should show comments read
-    expect(screen.getByText("Application Tailoring Console")).toBeInTheDocument();
-    expect(screen.getByText(/Candidate instructions read/)).toBeInTheDocument();
-    expect(screen.getByText("Designed mobile UI")).toBeInTheDocument();
-    expect(screen.getByText("Highlight design systems.")).toBeInTheDocument();
+    // Percentage progress bar rendered
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(screen.getByText("Putting your application together…")).toBeInTheDocument();
 
-    // Emitting running step
-    emit({
-      id: "job-write-1",
-      type: "write-documents",
-      status: "RUNNING",
-      step: "Tailoring your LaTeX resume",
-    });
-    expect(screen.getByText("[Agent] Tailoring your LaTeX resume")).toBeInTheDocument();
-
-    // Emitting job completion with tailored LaTeX code
+    // Emitting job completion
     emit({
       id: "job-write-1",
       type: "write-documents",
       status: "DONE",
       step: "Writing your cover letter",
       result: {
-        resume: [],
-        resumeWith: "v1",
+        resume: [{ id: "summary", label: "Summary", text: "Resume" }],
+        resumeWith: "latex-base",
         letter: [],
         letterWith: "v1",
-        latex: "\\documentclass{article}\n\\begin{document}\nTailored resume with Figma\n\\end{document}",
-        latexStatus: "tailored",
+        latex: "\\documentclass{article}\n\\begin{document}\nBase resume\n\\end{document}",
+        latexStatus: "none",
         baseLatex: "\\documentclass{article}\n\\begin{document}\nBase resume\n\\end{document}",
       },
     });
 
-    // Should display diff and 'View application →' button
-    expect(screen.getByText("Tailored LaTeX changes")).toBeInTheDocument();
-    expect(screen.getByText("Tailored resume with Figma")).toBeInTheDocument();
-
-    const viewButton = screen.getByRole("button", { name: "View application →" });
-    await user.click(viewButton);
-    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith("/applications/app-1"));
+    await vi.waitFor(() => expect(router.push).toHaveBeenCalledWith("/applications/app-1?tailor=1"));
   });
 });
 
