@@ -101,6 +101,7 @@ describe("refineJob - LaTeX flow", () => {
     );
 
     expect(result.messageId).toBe("reply-msg-1");
+    if (!("hunks" in result)) throw new Error("Expected hunks in result");
     expect(result.hunks).toBeDefined();
     expect(result.hunks).toHaveLength(1);
     expect(result.hunks![0].oldText).toContain("Built backend services with Node.js and Redis.");
@@ -154,6 +155,7 @@ describe("refineJob - LaTeX flow", () => {
     );
 
     expect(result.messageId).toBe("reply-msg-2");
+    if (!("hunks" in result)) throw new Error("Expected hunks in result");
     expect(result.hunks).toEqual([]);
     expect(result.edited).toEqual([]);
   });

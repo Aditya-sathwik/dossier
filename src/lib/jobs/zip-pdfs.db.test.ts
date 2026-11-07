@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", async () => {
 const dataDir = vi.hoisted(() => ({ path: "" }));
 vi.mock("@/lib/env", () => ({ env: { get DOSSIER_DATA_DIR() { return dataDir.path; } } }));
 vi.mock("@/lib/pdf/render", () => ({ renderPdf: vi.fn(async (page: string) => new TextEncoder().encode(`%PDF ${page}`)) }));
-vi.mock("@/lib/profile-data", () => ({ loadProfileName: async () => "Jane Doe" }));
+vi.mock("@/lib/profile-data", () => ({ loadProfileName: async () => "Jane Doe", loadProfile: async () => ({ basics: { name: "Jane Doe" } }) }));
 vi.mock("./runner", () => ({ defineJob: <T,>(definition: T) => definition }));
 
 const prisma = () => db.client!;

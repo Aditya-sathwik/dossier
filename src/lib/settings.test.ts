@@ -2,7 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import { DateFormat } from "@/generated/prisma/enums";
 
-import { DATE_FORMATS, formatDocumentDate, maxPages, pagesInWords, settingsFromRows, settingValue, type SettingsData } from "./settings";
+import {
+  DATE_FORMATS,
+  DEFAULT_BASE_COVER_LETTER_BODY,
+  DEFAULT_BASE_COVER_LETTER_SUBJECT,
+  DEFAULT_BASE_EMAIL_BODY,
+  DEFAULT_BASE_EMAIL_SUBJECT,
+  DEFAULT_BASE_ROLE,
+  formatDocumentDate,
+  maxPages,
+  pagesInWords,
+  settingsFromRows,
+  settingValue,
+  type SettingsData,
+} from "./settings";
 
 const date = new Date(Date.UTC(2026, 8, 7));
 
@@ -42,6 +55,12 @@ describe("stored settings", () => {
       resumeLanguage: null,
       resumeFormat: "standard",
       baseResumeLatex: "",
+      baseEmailTrack: "fullstack",
+      baseEmailSubject: DEFAULT_BASE_EMAIL_SUBJECT,
+      baseEmailBody: DEFAULT_BASE_EMAIL_BODY,
+      baseCoverLetterSubject: DEFAULT_BASE_COVER_LETTER_SUBJECT,
+      baseCoverLetterBody: DEFAULT_BASE_COVER_LETTER_BODY,
+      baseCoverLetterRole: DEFAULT_BASE_ROLE,
       customLanguages: [],
       fileNamePattern: "{name} – {company} – {doc}",
       includeRefs: false,

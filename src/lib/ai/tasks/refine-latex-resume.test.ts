@@ -25,8 +25,6 @@ describe("refineLatexResume", () => {
         reply: "I updated your summary to highlight Rust.",
         edits: [
           {
-            blockId: "B2",
-            action: "replace",
             find: "\\item Original bullet point.",
             replace: "\\item Tailored bullet point emphasizing Rust.",
             reason: "Align with Rust Dev requirement",
@@ -56,7 +54,7 @@ describe("refineLatexResume", () => {
 
     expect(result.data.reply).toBe("I updated your summary to highlight Rust.");
     expect(result.data.edits).toHaveLength(1);
-    expect(result.data.edits[0].blockId).toBe("B2");
+    expect(result.data.edits[0].find).toBe("\\item Original bullet point.");
     expect(result.data.edits[0].replace).toContain("emphasizing Rust");
   });
 

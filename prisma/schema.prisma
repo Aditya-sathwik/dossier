@@ -456,6 +456,8 @@ model Application {
   agentCandidate      AgentCandidate?
   /// The startup it was started from on Startups, if any (#222).
   startup             Startup?
+  /// The outreach contact it was sent to, if started from Outreach.
+  outreachContact     OutreachContact?
   /// Mail sent and received about it through Gmail (E15-3).
   emails              EmailMessage[]
   events              StatusEvent[]
@@ -945,3 +947,57 @@ model Job {
   @@index([status])
   @@index([applicationId])
 }
+
+// ─── Outreach Contacts ───────────────────────────────────────────────────────
+
+enum OutreachStatus {
+  NEW
+  QUEUED
+  SENT
+  FAILED
+  SKIPPED
+}
+
+/// A company contact imported from an Excel sheet or Google Sheet for cold outreach.
+model OutreachContact {
+  id            String         @id @default(cuid())
+  /// Case-insensitive unique constraint to prevent duplicate emails across batches.
+  email         String         @unique @db.Citext
+  company       String         @default("")
+  contactPerson String         @default("")
+  phone         String         @default("")
+  role          String         @default("")
+  notes         String         @default("")
+  source        String         @default("")
+  sheetName     String         @default("")
+  status        OutreachStatus @default(NEW)
+  sentAt        DateTime?
+  gmailThreadId String?
+  lastError     String?
+  applicationId String?        @unique
+  application   Application?   @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status])
+  @@index([company])
+  @@index([sheetName])
+}
+
+/// A company extracted from a spreadsheet that does not yet have an email address.
+/// Persisted locally so navigating between pages retains your research backlog.
+model OutreachPendingCompany {
+  id            String   @id @default(cuid())
+  company       String   @default("")
+  contactPerson String   @default("")
+  phone         String   @default("")
+  notes         String   @default("")
+  sheetName     String   @default("Sheet1")
+  source        String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([company])
+  @@index([sheetName])
+}
+

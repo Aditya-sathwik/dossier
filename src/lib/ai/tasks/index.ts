@@ -12,3 +12,5 @@ export { WRITE_EMAIL_VERSION, writeEmail } from "./write-email";
 export { CLASSIFY_REPLY_VERSION, classifyReply, type Classified } from "./classify-reply";
 export { DRAFT_REPLY_VERSION, draftReply, type DraftedReply } from "./draft-reply";
 export { SCORE_POSTING_VERSION, scorePosting, type PostingScore } from "./score-posting";
+export { WRITE_BASE_COVER_LETTER_VERSION, writeBaseCoverLetter, type BaseCoverLetterInput, type BaseCoverLetterOutput } from "./write-base-cover-letter";
+export { WRITE_BASE_EMAIL_VERSION, writeBaseEmail, type BaseEmailInput, type BaseEmailOutput } from "./write-base-email";

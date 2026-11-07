@@ -28,10 +28,12 @@ describe("NavLinks", () => {
       "Dashboard",
       "Profile",
       "Base resume",
+      "Base cover letter",
       "Find jobs",
       "Startups",
       "Agent",
       "Applications",
+      "Outreach",
       "Inbox",
       "Settings",
     ]);
@@ -43,6 +45,7 @@ describe("NavLinks", () => {
     expect(currentItem("/resume")).toEqual(["Base resume"]);
     expect(currentItem("/jobs")).toEqual(["Find jobs"]);
     expect(currentItem("/startups")).toEqual(["Startups"]);
+    expect(currentItem("/outreach")).toEqual(["Outreach"]);
     expect(currentItem("/settings")).toEqual(["Settings"]);
   });
 

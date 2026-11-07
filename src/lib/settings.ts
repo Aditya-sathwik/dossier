@@ -68,6 +68,74 @@ export const pagesInWords = (pages: number) => (pages === 1 ? "one page" : pages
 
 export const DEFAULT_BASE_THEME = "editorial";
 
+export type OutreachTrack = "fullstack" | "frontend" | "backend" | "mobile";
+
+export const DEFAULT_BASE_ROLE = "Full-Stack Engineer";
+
+export const DEFAULT_BASE_EMAIL_SUBJECT = "full-stack / software engineering at {{company}}";
+
+export const DEFAULT_BASE_EMAIL_BODY = [
+  "Hi {{contactPerson}},",
+  "I'm a Full-Stack Developer (React.js, Node.js, TypeScript, and React Native) with 2 years of experience, reaching out to see if {{company}} has any openings on the engineering team.",
+  "Recently, I cut web load times by 20% on the DMRC Momentum 2.0 React platform, built multi-tenant Node.js and PostgreSQL backends with real-time Socket.IO, and shipped the AP ASTraM mobile app with native Kotlin modules.",
+  "I've attached my resume. Are you folks hiring for full-stack, frontend, or backend roles right now?",
+  "Thanks,\n{{name}}",
+].join("\n\n");
+
+export const EMAIL_TRACK_PRESETS: Record<
+  OutreachTrack,
+  { role: string; subject: string; body: string }
+> = {
+  fullstack: {
+    role: "Full-Stack Engineer",
+    subject: DEFAULT_BASE_EMAIL_SUBJECT,
+    body: DEFAULT_BASE_EMAIL_BODY,
+  },
+  frontend: {
+    role: "Frontend Engineer",
+    subject: "frontend engineering (react / typescript) at {{company}}",
+    body: [
+      "Hi {{contactPerson}},",
+      "I'm a Frontend and Mobile Engineer (React.js, TypeScript, Redux, and React Native) with 2 years of experience, reaching out to see if {{company}} has any frontend openings.",
+      "On the DMRC Momentum 2.0 transit web platform, I cut page load times by 20% through dynamic content loading and modular React architecture, alongside building offline-first mobile apps and multi-tenant web dashboards.",
+      "I've attached my resume. Are you folks adding any frontend or UI engineers to the team right now?",
+      "Thanks,\n{{name}}",
+    ].join("\n\n"),
+  },
+  backend: {
+    role: "Backend Engineer",
+    subject: "backend / full-stack engineering (node.js) at {{company}}",
+    body: [
+      "Hi {{contactPerson}},",
+      "I'm a Full-Stack & Backend Engineer (Node.js, TypeScript, PostgreSQL, and React) with 2 years of experience, reaching out to see if {{company}} has any backend or full-stack openings.",
+      "Recently, I architected multi-tenant SaaS backends in Node.js and PostgreSQL featuring white-label subdomains, real-time Socket.IO event pipelines, and WhatsApp Cloud API integrations, alongside production transit platforms.",
+      "I've attached my resume. Are you folks hiring for backend or full-stack roles right now?",
+      "Thanks,\n{{name}}",
+    ].join("\n\n"),
+  },
+  mobile: {
+    role: "React Native / Mobile Engineer",
+    subject: "mobile / react native engineering at {{company}}",
+    body: [
+      "Hi {{contactPerson}},",
+      "I'm a Mobile & Full-Stack Engineer (React Native, Kotlin, Swift, and Node.js) with 2 years of experience, reaching out to see if {{company}} has any mobile openings.",
+      "My main mobile project is AP ASTraM, a city transit and safety app where I built the React Native layer, native Kotlin background location services, and offline SQLite sync. I also cut web load times by 20% on DMRC Momentum 2.0.",
+      "I've attached my resume. Are you folks looking for any mobile or full-stack engineers right now?",
+      "Thanks,\n{{name}}",
+    ].join("\n\n"),
+  },
+};
+
+export const DEFAULT_BASE_COVER_LETTER_SUBJECT = "Full-Stack Engineer application: {{role}} – {{name}}";
+export const DEFAULT_BASE_COVER_LETTER_BODY = [
+  "Dear {{contactPerson}},",
+  "I am applying for {{role}} roles at {{company}}. I am a Full-Stack Engineer with 2 years of experience building scalable web platforms, high-throughput Node.js backends, and responsive React Native mobile apps.",
+  "On the DMRC Momentum 2.0 web platform, I reduced page load times by 20% through dynamic content loading and modular React architecture. For AP ASTraM, a city transit and safety application, I implemented native Kotlin location modules and offline-first SQLite sync. Furthermore, I have engineered multi-tenant Node.js and PostgreSQL architectures featuring real-time Socket.IO pipelines and WhatsApp Cloud API integrations.",
+  "My core stack spans React.js, Node.js, TypeScript, PostgreSQL, and React Native. I prioritize targeted, maintainable solutions over unnecessary rewrites, with deep attention to system reliability and clean documentation.",
+  "I would welcome the opportunity to discuss how my full-stack background can support {{company}}'s engineering goals. My resume is attached, and I look forward to connecting.",
+  "Sincerely,\n{{name}}",
+].join("\n\n");
+
 export const RESUME_FORMATS = ["standard", "latex"] as const;
 export type ResumeFormat = (typeof RESUME_FORMATS)[number];
 
@@ -138,6 +206,18 @@ export const settingsSchema = z.object({
   resumeFormat: z.enum(RESUME_FORMATS).catch("standard"),
   /** Base LaTeX resume code saved by the user. */
   baseResumeLatex: z.string().catch(""),
+  /** Active outreach email track preset: fullstack, frontend, backend, or mobile. */
+  baseEmailTrack: z.enum(["fullstack", "frontend", "backend", "mobile"]).catch("fullstack"),
+  /** Cold outreach email subject line template. */
+  baseEmailSubject: z.string().catch(DEFAULT_BASE_EMAIL_SUBJECT),
+  /** Cold outreach email body template (~75-85 words). */
+  baseEmailBody: z.string().catch(DEFAULT_BASE_EMAIL_BODY),
+  /** Base cover letter subject line template for company outreach / portal applications. */
+  baseCoverLetterSubject: z.string().catch(DEFAULT_BASE_COVER_LETTER_SUBJECT),
+  /** Base cover letter body template with dynamic variables. */
+  baseCoverLetterBody: z.string().catch(DEFAULT_BASE_COVER_LETTER_BODY),
+  /** Default target role for cold outreach and cover letter. */
+  baseCoverLetterRole: z.string().catch(DEFAULT_BASE_ROLE),
   /** The Applications screen as last left (LST-7): view, filter and sort, e.g. "-match". */
   applicationsView: z.enum(["board", "table"]).catch("board"),
   applicationsFilter: z.enum(["all", "active", "closed"]).catch("all"),
